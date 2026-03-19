@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/brian-bell/wt/gitquery"
 	"github.com/brian-bell/wt/scanner"
 )
 
@@ -17,14 +18,20 @@ var (
 	placeholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Italic(true)
 	statusStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	dividerStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+	branchStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true)
+	dirtyStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+	cleanStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	commitStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 )
 
 // RenderParams holds everything the renderer needs.
 type RenderParams struct {
-	Repos    []scanner.Repo
-	Selected int
-	Width    int
-	Height   int
+	Repos     []scanner.Repo
+	Selected  int
+	Width     int
+	Height    int
+	Mode      int
+	Worktrees []gitquery.Worktree
 }
 
 // Render produces the full terminal view string.
@@ -47,7 +54,13 @@ func Render(p RenderParams) string {
 	if rightWidth < 0 {
 		rightWidth = 0
 	}
-	rightLines := renderRightPane(rightWidth, contentHeight)
+
+	var rightLines []string
+	if p.Mode == 1 && len(p.Worktrees) > 0 {
+		rightLines = renderWorktreePane(p.Worktrees, rightWidth, contentHeight)
+	} else {
+		rightLines = renderPlaceholderPane(rightWidth, contentHeight)
+	}
 
 	// Build divider
 	divider := make([]string, contentHeight)
@@ -67,7 +80,7 @@ func Render(p RenderParams) string {
 
 // RenderStatusBar produces the bottom status bar.
 func RenderStatusBar(width int) string {
-	text := "  ↑/↓: navigate  q: quit"
+	text := "  [1] worktrees  ↑/↓: navigate  1/2/3: view  q: quit"
 	return statusStyle.Width(width).Render(text)
 }
 
@@ -99,7 +112,67 @@ func renderRepoList(repos []scanner.Repo, selected, height int) []string {
 	return lines
 }
 
-func renderRightPane(width, height int) []string {
+func renderWorktreePane(worktrees []gitquery.Worktree, _, height int) []string {
+	var content []string
+
+	for i, wt := range worktrees {
+		if wt.IsBare {
+			continue
+		}
+
+		// Branch line: "  main ✔" or "  feature/auth ● +2/-1"
+		branch := branchStyle.Render(wt.Branch)
+		var status string
+		if wt.Dirty {
+			status = dirtyStyle.Render(" ●")
+		} else {
+			status = cleanStyle.Render(" ✔")
+		}
+
+		var upstream string
+		if wt.Ahead > 0 || wt.Behind > 0 {
+			upstream = fmt.Sprintf(" +%d/-%d", wt.Ahead, wt.Behind)
+		} else if wt.Ahead == 0 && wt.Behind == 0 && len(wt.Unpushed) == 0 {
+			// Could have upstream but be in sync, or no upstream at all.
+			// We check if there are no unpushed commits and counts are 0.
+		}
+
+		line := "  " + branch + status
+		if upstream != "" {
+			line += " " + upstream
+		}
+		content = append(content, line)
+
+		// Unpushed commits (max 5)
+		maxShow := 5
+		for j, msg := range wt.Unpushed {
+			if j >= maxShow {
+				remaining := len(wt.Unpushed) - maxShow
+				content = append(content, "    "+commitStyle.Render(fmt.Sprintf("... and %d more", remaining)))
+				break
+			}
+			content = append(content, "    "+commitStyle.Render(msg))
+		}
+
+		// Blank line between entries
+		if i < len(worktrees)-1 {
+			content = append(content, "")
+		}
+	}
+
+	// Pad to fill height
+	lines := make([]string, height)
+	for i := 0; i < height; i++ {
+		if i < len(content) {
+			lines[i] = content[i]
+		} else {
+			lines[i] = ""
+		}
+	}
+	return lines
+}
+
+func renderPlaceholderPane(width, height int) []string {
 	lines := make([]string, height)
 
 	placeholder := placeholderStyle.Render("nothing here yet")
@@ -107,7 +180,6 @@ func renderRightPane(width, height int) []string {
 	mid := height / 2
 	for i := 0; i < height; i++ {
 		if i == mid {
-			// Center the placeholder horizontally
 			pad := (width - lipgloss.Width(placeholder)) / 2
 			if pad < 0 {
 				pad = 0

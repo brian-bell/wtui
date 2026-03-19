@@ -1,101 +1,65 @@
-# wt — Git Worktree Manager
+# wt
 
-A lightweight shell script for managing git worktrees across multiple repositories.
+A terminal UI for managing git worktrees across repositories.
 
-## Installation
+![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)
 
-Copy `wt` to a directory on your `PATH` and make it executable:
+## Install
 
 ```bash
-cp wt ~/bin/wt
-chmod +x ~/bin/wt
+git clone https://github.com/brian-bell/wt.git
+cd wt
+make build
 ```
 
-## Configuration
-
-| Variable | Default | Description |
-|---|---|---|
-| `WORKTREE_ROOT` | `~/dev` | Root directory containing your repositories |
-
-Worktrees for a repository named `my-repo` are stored in `$WORKTREE_ROOT/my-repo-worktrees/`.
+The binary is built to `bin/wt`.
 
 ## Usage
 
-```
-wt <command> <args>
+```bash
+# Run with default root (~/dev)
+./bin/wt
+
+# Run with a custom root
+WORKTREE_ROOT=~/projects ./bin/wt
 ```
 
-### Create a worktree
+### Keys
+
+| Key | Action |
+|-----|--------|
+| `↑`/`k` | Move selection up |
+| `↓`/`j` | Move selection down |
+| `1` | Worktree view (branch, dirty status, ahead/behind, unpushed commits) |
+| `2` | Stashes view (placeholder) |
+| `3` | Branches view (placeholder) |
+| `q` | Quit |
+
+### Worktree view
+
+The right pane shows each worktree's:
+
+- Branch name with dirty (`●`) or clean (`✔`) indicator
+- Ahead/behind counts relative to upstream (`+2/-1`)
+- Unpushed commit messages (up to 5, with overflow count)
+
+## Configuration
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `WORKTREE_ROOT` | `~/dev` | Root directory to scan for git repos (up to 2 levels deep) |
+
+## Development
 
 ```bash
-wt create <repo> <branch>
-```
-
-Creates a worktree for `<branch>` in the `<repo>-worktrees/` directory. If the branch
-doesn't exist locally or on the remote, it is created automatically from HEAD.
-
-Branch names containing `/` are sanitized to `-` for the worktree directory name
-(e.g., `feature/login` is stored in the directory `feature-login`).
-
-```bash
-# Existing branch
-wt create my-app main
-
-# New branch (created from HEAD)
-wt create my-app feature/new-dashboard
-# -> ~/dev/my-app-worktrees/feature-new-dashboard
-```
-
-### List worktrees
-
-```bash
-wt list <repo>
-```
-
-Lists all worktrees registered to the repository.
-
-```bash
-wt list my-app
-```
-
-### Remove a worktree
-
-```bash
-wt remove <repo> <branch>
-```
-
-Removes a worktree by its branch name. Uses the same `/` to `-` sanitization when
-resolving the directory.
-
-```bash
-wt remove my-app feature/new-dashboard
-```
-
-### Prune stale references
-
-```bash
-wt prune <repo>
-```
-
-Cleans up worktree metadata for directories that no longer exist on disk.
-
-```bash
-wt prune my-app
-```
-
-## Directory Layout
-
-Given `WORKTREE_ROOT=~/dev` and a repository called `my-app`:
-
-```
-~/dev/
-  my-app/                        # main repository clone
-  my-app-worktrees/
-    feature-new-dashboard/       # worktree for feature/new-dashboard
-    bugfix-auth-token/           # worktree for bugfix/auth-token
+make build   # Build binary to bin/wt
+make test    # Run all tests
+make run     # Build and run
+make tidy    # go mod tidy
+make clean   # Remove bin/
 ```
 
 ## Requirements
 
+- Go 1.26+
 - Git 2.15+ (worktree support)
-- Bash 4+
