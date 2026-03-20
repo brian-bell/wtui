@@ -56,37 +56,12 @@ func StashDiff(repoPath string, index int) (string, error) {
 	return out, nil
 }
 
-// Worktree represents a single git worktree with its status.
-type Worktree struct {
-	Path        string
-	Branch      string
-	IsBare      bool
-	Dirty       bool
-	HasUpstream bool
-	Ahead       int
-	Behind      int
-	Unpushed    []string
-}
-
-// ListWorktrees returns worktree information for the given repo path.
-func ListWorktrees(repoPath string) ([]Worktree, error) {
-	out, err := gitCmd(repoPath, "worktree", "list", "--porcelain")
-	if err != nil {
-		return nil, fmt.Errorf("listing worktrees: %w", err)
-	}
-
-	var worktrees []Worktree
-	for _, block := range splitWorktreeBlocks(out) {
-		wt := parseWorktreeBlock(block)
-		if wt.Path == "" {
-			continue
-		}
-		if !wt.IsBare {
-			fillStatus(&wt)
-		}
-		worktrees = append(worktrees, wt)
-	}
-	return worktrees, nil
+// worktreeInfo is internal data parsed from git worktree list output.
+type worktreeInfo struct {
+	path     string
+	branch   string
+	isBare   bool
+	detached bool
 }
 
 func splitWorktreeBlocks(output string) []string {
@@ -108,62 +83,38 @@ func splitWorktreeBlocks(output string) []string {
 	return blocks
 }
 
-func parseWorktreeBlock(block string) Worktree {
-	var wt Worktree
+func parseWorktreeBlock(block string) worktreeInfo {
+	var wt worktreeInfo
 	for _, line := range strings.Split(block, "\n") {
 		switch {
 		case strings.HasPrefix(line, "worktree "):
-			wt.Path = strings.TrimPrefix(line, "worktree ")
+			wt.path = strings.TrimPrefix(line, "worktree ")
 		case strings.HasPrefix(line, "branch refs/heads/"):
-			wt.Branch = strings.TrimPrefix(line, "branch refs/heads/")
+			wt.branch = strings.TrimPrefix(line, "branch refs/heads/")
 		case line == "bare":
-			wt.IsBare = true
+			wt.isBare = true
 		case line == "detached":
-			wt.Branch = "(detached)"
+			wt.detached = true
+			wt.branch = "(detached)"
 		}
 	}
 	return wt
 }
 
-func fillStatus(wt *Worktree) {
-	// Dirty check
-	out, err := gitCmd(wt.Path, "status", "--porcelain")
-	if err == nil && len(strings.TrimSpace(out)) > 0 {
-		wt.Dirty = true
-	}
-
-	// Ahead/behind
-	out, err = gitCmd(wt.Path, "rev-list", "--count", "--left-right", "@{upstream}...HEAD")
-	if err == nil {
-		wt.HasUpstream = true
-		parts := strings.Fields(strings.TrimSpace(out))
-		if len(parts) == 2 {
-			wt.Behind, _ = strconv.Atoi(parts[0])
-			wt.Ahead, _ = strconv.Atoi(parts[1])
-		}
-	}
-
-	// Unpushed commit messages
-	out, err = gitCmd(wt.Path, "log", "--oneline", "@{upstream}..HEAD")
-	if err == nil {
-		wt.Unpushed = splitLines(out)
-	}
-}
-
 // Branch represents a local git branch with its status.
 type Branch struct {
-	Name         string
-	HasUpstream  bool
-	UpstreamGone bool
-	Ahead        int
-	Behind       int
-	Unpushed     []string
-	IsWorktree   bool
-	WorktreePath string
-	Dirty        bool
-	FilesChanged int
-	LinesAdded   int
-	LinesDeleted int
+	Name          string
+	HasUpstream   bool
+	UpstreamGone  bool
+	Ahead         int
+	Behind        int
+	Unpushed      []string
+	IsWorktree    bool
+	WorktreePaths []string
+	Dirty         bool
+	FilesChanged  int
+	LinesAdded    int
+	LinesDeleted  int
 }
 
 const refFormat = "%(refname:short)\t%(upstream)\t%(upstream:track)"
@@ -175,7 +126,7 @@ func ListBranches(repoPath string) ([]Branch, error) {
 		return nil, err
 	}
 
-	wtMap, err := branchWorktreeMap(repoPath)
+	wtMap, detachedPaths, err := branchWorktreeMap(repoPath)
 	if err != nil {
 		return nil, err
 	}
@@ -199,17 +150,30 @@ func ListBranches(repoPath string) ([]Branch, error) {
 			}
 		}
 
-		if wtPath, ok := wtMap[b.Name]; ok {
+		if wtPaths, ok := wtMap[b.Name]; ok {
 			b.IsWorktree = true
-			b.WorktreePath = wtPath
-			populateDirtyStatus(&b)
+			b.WorktreePaths = wtPaths
+			populateDirtyStatus(&b, wtPaths)
 		}
 
 		branches = append(branches, b)
 	}
 
+	for _, path := range detachedPaths {
+		b := Branch{
+			Name:          "(detached)",
+			IsWorktree:    true,
+			WorktreePaths: []string{path},
+		}
+		populateDirtyStatus(&b, b.WorktreePaths)
+		branches = append(branches, b)
+	}
+
 	sort.Slice(branches, func(i, j int) bool {
-		return branches[i].Name < branches[j].Name
+		if branches[i].Name != branches[j].Name {
+			return branches[i].Name < branches[j].Name
+		}
+		return firstWorktreePath(branches[i].WorktreePaths) < firstWorktreePath(branches[j].WorktreePaths)
 	})
 
 	return branches, nil
@@ -220,21 +184,29 @@ func BranchDiff(worktreePath string) (string, error) {
 	return gitCmd(worktreePath, "diff", "HEAD")
 }
 
-// branchWorktreeMap returns a map of branch name -> worktree path.
-func branchWorktreeMap(repoPath string) (map[string]string, error) {
+// branchWorktreeMap returns a map of branch name -> worktree paths and detached worktree paths.
+func branchWorktreeMap(repoPath string) (map[string][]string, []string, error) {
 	out, err := gitCmd(repoPath, "worktree", "list", "--porcelain")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	m := make(map[string]string)
+	m := make(map[string][]string)
+	var detachedPaths []string
 	for _, block := range splitWorktreeBlocks(out) {
 		wt := parseWorktreeBlock(block)
-		if wt.Branch != "" && !wt.IsBare {
-			m[wt.Branch] = wt.Path
+		if wt.isBare {
+			continue
+		}
+		if wt.detached {
+			detachedPaths = append(detachedPaths, wt.path)
+			continue
+		}
+		if wt.branch != "" {
+			m[wt.branch] = append(m[wt.branch], wt.path)
 		}
 	}
-	return m, nil
+	return m, detachedPaths, nil
 }
 
 func parseBranchLine(line string) (Branch, string) {
@@ -277,33 +249,42 @@ func unpushedCommits(repoPath, branchName, upstream string) []string {
 	return splitLines(out)
 }
 
-func populateDirtyStatus(b *Branch) {
-	statusOut, err := gitCmd(b.WorktreePath, "status", "--porcelain")
-	if err != nil {
-		return
-	}
-	statusLines := splitLines(statusOut)
-	if len(statusLines) == 0 {
-		return
-	}
-	b.Dirty = true
-	b.FilesChanged = len(statusLines)
-
-	diffOut, err := gitCmd(b.WorktreePath, "diff", "HEAD", "--numstat")
-	if err != nil {
-		return
-	}
-	for _, line := range splitLines(diffOut) {
-		fields := strings.Fields(line)
-		if len(fields) < 3 {
+func populateDirtyStatus(b *Branch, paths []string) {
+	for _, path := range paths {
+		statusOut, err := gitCmd(path, "status", "--porcelain")
+		if err != nil {
 			continue
 		}
-		// Binary files show "-\t-\tfilename"; Atoi returns 0 for "-".
-		added, _ := strconv.Atoi(fields[0])
-		deleted, _ := strconv.Atoi(fields[1])
-		b.LinesAdded += added
-		b.LinesDeleted += deleted
+		statusLines := splitLines(statusOut)
+		if len(statusLines) == 0 {
+			continue
+		}
+		b.Dirty = true
+		b.FilesChanged += len(statusLines)
+
+		diffOut, err := gitCmd(path, "diff", "HEAD", "--numstat")
+		if err != nil {
+			continue
+		}
+		for _, line := range splitLines(diffOut) {
+			fields := strings.Fields(line)
+			if len(fields) < 3 {
+				continue
+			}
+			// Binary files show "-\t-\tfilename"; Atoi returns 0 for "-".
+			added, _ := strconv.Atoi(fields[0])
+			deleted, _ := strconv.Atoi(fields[1])
+			b.LinesAdded += added
+			b.LinesDeleted += deleted
+		}
 	}
+}
+
+func firstWorktreePath(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	return paths[0]
 }
 
 func gitCmd(dir string, args ...string) (string, error) {

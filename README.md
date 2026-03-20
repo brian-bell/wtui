@@ -39,11 +39,14 @@ WORKTREE_ROOT=~/projects ./bin/wt
 
 ### Branches view (mode 1)
 
-The right pane shows each worktree's:
+The right pane shows all local branches alphabetically with stacking indicators:
 
-- Branch name with status indicator: `✔` clean (green), `●` dirty (yellow), `●` no upstream (red)
-- Ahead/behind counts relative to upstream (`+2/-1`)
-- Unpushed commit messages (up to 5, with overflow count)
+- `✔` green: even with upstream, clean working tree
+- `●` yellow: ahead/behind upstream — shows `+N/-N` counts
+- `●` red: dirty worktree — shows `N files +X/-Y` (lines added/deleted)
+- `●` purple: no upstream or upstream gone
+
+Worktree branches are annotated with `[<path>]`. If the same branch is checked out in more than one worktree, the UI shows `[<path1>, <path2>, ...]`. Detached worktrees appear as `(detached)` rows with their path annotation. Branches ahead of upstream show up to 5 unpushed commit messages, with overflow count.
 
 ### Stashes view (mode 2)
 

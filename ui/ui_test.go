@@ -1,18 +1,13 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
-
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/brian-bell/wt/gitquery"
 	"github.com/brian-bell/wt/scanner"
 )
-
-func lipglossWidth(s string) int {
-	return lipgloss.Width(s)
-}
 
 func TestStatusBar_ActiveModeIsBracketed(t *testing.T) {
 	bar := RenderStatusBar(120, 1, 0)
@@ -34,7 +29,7 @@ func TestStatusBar_ActiveModeIsBracketed(t *testing.T) {
 
 func TestStatusBar_Mode1ContainsIndicatorLegend(t *testing.T) {
 	bar := RenderStatusBar(120, 1, 0)
-	for _, legend := range []string{"✔ clean", "● dirty", "● no upstream"} {
+	for _, legend := range []string{"✔ clean", "● ahead/behind", "● dirty", "● no upstream"} {
 		if !strings.Contains(bar, legend) {
 			t.Errorf("mode 1 status bar should contain legend %q", legend)
 		}
@@ -57,80 +52,6 @@ func TestStatusBar_ContainsHints(t *testing.T) {
 	}
 }
 
-func TestWorktreePane_NoUpstreamShowsRedDot(t *testing.T) {
-	wts := []gitquery.Worktree{
-		{Path: "/dev/alpha", Branch: "main", HasUpstream: false},
-	}
-	lines := renderWorktreePane(wts, 50, 10)
-	joined := strings.Join(lines, "\n")
-	// Should contain the red dot indicator (● styled red)
-	if !strings.Contains(joined, "●") {
-		t.Error("no-upstream worktree should show red dot indicator")
-	}
-}
-
-func TestWorktreePane_WithUpstreamNoRedDot(t *testing.T) {
-	wts := []gitquery.Worktree{
-		{Path: "/dev/alpha", Branch: "main", HasUpstream: true, Dirty: false},
-	}
-	lines := renderWorktreePane(wts, 50, 10)
-	joined := strings.Join(lines, "\n")
-	// Clean + has upstream → only ✔, no ●
-	if strings.Contains(joined, "●") {
-		t.Error("clean worktree with upstream should not show any dot indicator")
-	}
-}
-
-func TestWorktreePane_SkipsBareWorktrees(t *testing.T) {
-	wts := []gitquery.Worktree{
-		{Path: "/bare", Branch: "", IsBare: true},
-		{Path: "/dev/alpha", Branch: "main", Dirty: false},
-	}
-	lines := renderWorktreePane(wts, 50, 10)
-	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "main") {
-		t.Error("should contain non-bare worktree branch")
-	}
-	// Bare worktree has no branch name to display, but ensure no extra entries
-	// Count non-empty lines: should only have the "main" line
-	var nonEmpty int
-	for _, l := range lines {
-		if strings.TrimSpace(l) != "" {
-			nonEmpty++
-		}
-	}
-	if nonEmpty != 1 {
-		t.Errorf("expected 1 non-empty line (main only), got %d", nonEmpty)
-	}
-}
-
-func TestWorktreePane_CapsUnpushedAt5(t *testing.T) {
-	msgs := make([]string, 8)
-	for i := range msgs {
-		msgs[i] = "abc1234 commit message"
-	}
-	wts := []gitquery.Worktree{
-		{Path: "/dev/alpha", Branch: "feat", Unpushed: msgs},
-	}
-	lines := renderWorktreePane(wts, 50, 20)
-	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "and 3 more") {
-		t.Error("should show 'and 3 more' for 8 commits with cap of 5")
-	}
-	// Count commit lines (indented with 4 spaces, contain commit style)
-	var commitLines int
-	for _, l := range lines {
-		trimmed := strings.TrimSpace(l)
-		if strings.Contains(trimmed, "commit message") || strings.Contains(trimmed, "and 3 more") {
-			commitLines++
-		}
-	}
-	// 5 shown + 1 "and 3 more" = 6
-	if commitLines != 6 {
-		t.Errorf("expected 6 commit-related lines (5 + overflow), got %d", commitLines)
-	}
-}
-
 func TestRepoList_ScrollsWhenSelectionExceedsHeight(t *testing.T) {
 	repos := []scanner.Repo{
 		{Path: "/a", DisplayName: "alpha"},
@@ -150,55 +71,200 @@ func TestRepoList_ScrollsWhenSelectionExceedsHeight(t *testing.T) {
 	}
 }
 
-func TestWorktreePane_TruncatesLongBranchToWidth(t *testing.T) {
-	longBranch := strings.Repeat("x", 80)
-	wts := []gitquery.Worktree{
-		{Path: "/dev/alpha", Branch: longBranch},
+func TestBranchPane_CleanBranchShowsGreenCheck(t *testing.T) {
+	branches := []gitquery.Branch{
+		{Name: "main", HasUpstream: true, Ahead: 0, Behind: 0, Dirty: false},
 	}
-	width := 40
-	lines := renderWorktreePane(wts, width, 5)
-	for _, l := range lines {
-		// lipgloss.Width handles ANSI escape codes
-		if lipglossWidth(l) > width {
-			t.Errorf("line exceeds pane width %d: visual width %d", width, lipglossWidth(l))
-		}
+	lines := renderBranchPane(branches, 50, 10)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "main") {
+		t.Error("should contain branch name 'main'")
 	}
-}
-
-func TestWorktreePane_TruncatesLongCommitToWidth(t *testing.T) {
-	longMsg := "abc1234 " + strings.Repeat("w", 80)
-	wts := []gitquery.Worktree{
-		{Path: "/dev/alpha", Branch: "main", Unpushed: []string{longMsg}},
+	if !strings.Contains(joined, "✔") {
+		t.Error("clean branch with upstream should show ✔")
 	}
-	width := 40
-	lines := renderWorktreePane(wts, width, 5)
-	for _, l := range lines {
-		if lipglossWidth(l) > width {
-			t.Errorf("line exceeds pane width %d: visual width %d", width, lipglossWidth(l))
-		}
+	if strings.Contains(joined, "●") {
+		t.Error("clean branch with upstream should not show ●")
 	}
 }
 
-func TestWorktreePane_NoTrailingBlankWhenBareIsLast(t *testing.T) {
-	wts := []gitquery.Worktree{
-		{Path: "/dev/alpha", Branch: "main", Dirty: false},
-		{Path: "/bare", Branch: "", IsBare: true},
+func TestBranchPane_AheadBehindShowsYellowDotWithCounts(t *testing.T) {
+	branches := []gitquery.Branch{
+		{Name: "feature/auth", HasUpstream: true, Ahead: 3, Behind: 1, Dirty: false},
 	}
-	lines := renderWorktreePane(wts, 50, 5)
-	// Only "main" line should be non-empty; no trailing blank separator
-	var nonEmpty int
+	lines := renderBranchPane(branches, 60, 10)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "●") {
+		t.Error("ahead/behind branch should show ● indicator")
+	}
+	if !strings.Contains(joined, "+3/-1") {
+		t.Error("should show ahead/behind counts as +3/-1")
+	}
+	if strings.Contains(joined, "✔") {
+		t.Error("ahead/behind branch should not show ✔")
+	}
+}
+
+func TestBranchPane_DirtyShowsRedDotWithFileStats(t *testing.T) {
+	branches := []gitquery.Branch{
+		{Name: "feature/wip", HasUpstream: true, Dirty: true, IsWorktree: true,
+			FilesChanged: 3, LinesAdded: 10, LinesDeleted: 5},
+	}
+	lines := renderBranchPane(branches, 60, 10)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "●") {
+		t.Error("dirty branch should show ● indicator")
+	}
+	if !strings.Contains(joined, "3 files") {
+		t.Error("dirty branch should show file count")
+	}
+	if !strings.Contains(joined, "+10") {
+		t.Error("dirty branch should show lines added")
+	}
+	if !strings.Contains(joined, "-5") {
+		t.Error("dirty branch should show lines deleted")
+	}
+}
+
+func TestBranchPane_NoUpstreamShowsPurpleDot(t *testing.T) {
+	branches := []gitquery.Branch{
+		{Name: "local-only", HasUpstream: false},
+	}
+	lines := renderBranchPane(branches, 50, 10)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "●") {
+		t.Error("no-upstream branch should show ● indicator")
+	}
+	if strings.Contains(joined, "✔") {
+		t.Error("no-upstream branch should not show ✔")
+	}
+}
+
+func TestBranchPane_UpstreamGoneShowsPurpleDot(t *testing.T) {
+	branches := []gitquery.Branch{
+		{Name: "stale", HasUpstream: true, UpstreamGone: true},
+	}
+	lines := renderBranchPane(branches, 50, 10)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "●") {
+		t.Error("upstream-gone branch should show ● indicator")
+	}
+	if strings.Contains(joined, "✔") {
+		t.Error("upstream-gone branch should not show ✔")
+	}
+}
+
+func TestBranchPane_StacksAheadAndDirtyIndicators(t *testing.T) {
+	branches := []gitquery.Branch{
+		{Name: "feat", HasUpstream: true, Ahead: 2, Behind: 0, Dirty: true, IsWorktree: true,
+			FilesChanged: 1, LinesAdded: 5, LinesDeleted: 2},
+	}
+	lines := renderBranchPane(branches, 80, 10)
+	joined := strings.Join(lines, "\n")
+	// Should have both +2/-0 (ahead) and 1 files (dirty)
+	if !strings.Contains(joined, "+2/-0") {
+		t.Error("stacked: should show ahead/behind counts")
+	}
+	if !strings.Contains(joined, "1 files") {
+		t.Error("stacked: should show dirty file count")
+	}
+	// Should have two ● indicators
+	if strings.Count(joined, "●") < 2 {
+		t.Errorf("stacked: expected at least 2 dot indicators, got %d", strings.Count(joined, "●"))
+	}
+	if strings.Contains(joined, "✔") {
+		t.Error("stacked: should not show ✔ when there are indicators")
+	}
+}
+
+func TestBranchPane_WorktreeAnnotation(t *testing.T) {
+	branches := []gitquery.Branch{
+		{Name: "feat", HasUpstream: true, IsWorktree: true, WorktreePaths: []string{"/dev/proj-feat"}},
+	}
+	lines := renderBranchPane(branches, 60, 10)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "[/dev/proj-feat]") {
+		t.Error("worktree branch should show [<path>] annotation")
+	}
+}
+
+func TestBranchPane_DuplicateWorktreeAnnotation(t *testing.T) {
+	branches := []gitquery.Branch{
+		{Name: "feat", HasUpstream: true, IsWorktree: true, WorktreePaths: []string{"/dev/proj-feat", "/tmp/proj-feat-copy"}},
+	}
+	lines := renderBranchPane(branches, 80, 10)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "/dev/proj-feat") || !strings.Contains(joined, "/tmp/proj-feat-copy") {
+		t.Error("duplicate worktree branch should show both paths")
+	}
+	if strings.Contains(joined, "duplicate") || strings.Contains(joined, "wt:") {
+		t.Error("duplicate worktree branch should not show labels")
+	}
+}
+
+func TestBranchPane_DetachedWorktreeRow(t *testing.T) {
+	branches := []gitquery.Branch{
+		{Name: "(detached)", IsWorktree: true, WorktreePaths: []string{"/tmp/wt-detached"}},
+	}
+	lines := renderBranchPane(branches, 80, 10)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "(detached)") {
+		t.Error("detached worktree should render as a detached row")
+	}
+	if !strings.Contains(joined, "[/tmp/wt-detached]") {
+		t.Error("detached worktree should show its path annotation")
+	}
+}
+
+func TestBranchPane_NonWorktreeNoAnnotation(t *testing.T) {
+	branches := []gitquery.Branch{
+		{Name: "feat", HasUpstream: true, IsWorktree: false},
+	}
+	lines := renderBranchPane(branches, 60, 10)
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "[wt:") || strings.Contains(joined, "[duplicate:") {
+		t.Error("non-worktree branch should not show worktree annotation")
+	}
+}
+
+func TestBranchPane_UnpushedCommitsShown(t *testing.T) {
+	branches := []gitquery.Branch{
+		{Name: "feat", HasUpstream: true, Ahead: 2,
+			Unpushed: []string{"abc1234 Fix bug", "def5678 Add feature"}},
+	}
+	lines := renderBranchPane(branches, 60, 10)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "Fix bug") {
+		t.Error("should show unpushed commit message")
+	}
+	if !strings.Contains(joined, "Add feature") {
+		t.Error("should show second unpushed commit message")
+	}
+}
+
+func TestBranchPane_UnpushedCapsAt5WithOverflow(t *testing.T) {
+	msgs := make([]string, 8)
+	for i := range msgs {
+		msgs[i] = fmt.Sprintf("abc%d commit message %d", i, i)
+	}
+	branches := []gitquery.Branch{
+		{Name: "feat", HasUpstream: true, Ahead: 8, Unpushed: msgs},
+	}
+	lines := renderBranchPane(branches, 60, 20)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "and 3 more") {
+		t.Error("should show 'and 3 more' overflow for 8 commits with cap of 5")
+	}
+	// Count lines that contain commit content
+	var commitLines int
 	for _, l := range lines {
-		if strings.TrimSpace(l) != "" {
-			nonEmpty++
+		trimmed := strings.TrimSpace(l)
+		if strings.Contains(trimmed, "commit message") || strings.Contains(trimmed, "and 3 more") {
+			commitLines++
 		}
 	}
-	if nonEmpty != 1 {
-		t.Errorf("expected 1 non-empty line, got %d; trailing blank from bare entry?", nonEmpty)
-	}
-	// The line immediately after "main" should be empty padding, not a separator
-	// caused by the bare entry's index check
-	if strings.TrimSpace(lines[0]) == "" {
-		t.Error("first line should be the main branch, not empty")
+	if commitLines != 6 {
+		t.Errorf("expected 6 commit-related lines (5 + overflow), got %d", commitLines)
 	}
 }
 

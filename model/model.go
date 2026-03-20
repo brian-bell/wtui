@@ -24,10 +24,10 @@ const (
 	OverlayStashDiff OverlayState = 1
 )
 
-// WorktreeResultMsg is sent when worktree data is fetched asynchronously.
-type WorktreeResultMsg struct {
-	RepoPath  string
-	Worktrees []gitquery.Worktree
+// BranchResultMsg is sent when branch data is fetched asynchronously.
+type BranchResultMsg struct {
+	RepoPath string
+	Branches []gitquery.Branch
 }
 
 // StashResultMsg is sent when stash data is fetched asynchronously.
@@ -50,7 +50,7 @@ type Model struct {
 	width         int
 	height        int
 	mode          Mode
-	worktrees     []gitquery.Worktree
+	branches      []gitquery.Branch
 	stashes       []gitquery.Stash
 	stashSelected int
 	overlay       OverlayState
@@ -63,28 +63,28 @@ func New(repos []scanner.Repo) Model {
 	return Model{repos: repos, mode: ModeBranches}
 }
 
-func (m Model) Selected() int                  { return m.selected }
-func (m Model) Width() int                     { return m.width }
-func (m Model) Height() int                    { return m.height }
-func (m Model) Mode() Mode                     { return m.mode }
-func (m Model) Worktrees() []gitquery.Worktree { return m.worktrees }
-func (m Model) Stashes() []gitquery.Stash      { return m.stashes }
-func (m Model) StashSelected() int             { return m.stashSelected }
-func (m Model) Overlay() OverlayState          { return m.overlay }
-func (m Model) OverlayDiff() string            { return m.overlayDiff }
-func (m Model) OverlayScroll() int             { return m.overlayScroll }
+func (m Model) Selected() int               { return m.selected }
+func (m Model) Width() int                  { return m.width }
+func (m Model) Height() int                 { return m.height }
+func (m Model) Mode() Mode                  { return m.mode }
+func (m Model) Branches() []gitquery.Branch { return m.branches }
+func (m Model) Stashes() []gitquery.Stash   { return m.stashes }
+func (m Model) StashSelected() int          { return m.stashSelected }
+func (m Model) Overlay() OverlayState       { return m.overlay }
+func (m Model) OverlayDiff() string         { return m.overlayDiff }
+func (m Model) OverlayScroll() int          { return m.overlayScroll }
 
 func (m Model) Init() tea.Cmd {
-	return m.fetchWorktrees()
+	return m.fetchBranches()
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
-	case WorktreeResultMsg:
+	case BranchResultMsg:
 		if m.selected < len(m.repos) && msg.RepoPath == m.repos[m.selected].Path {
-			m.worktrees = msg.Worktrees
+			m.branches = msg.Branches
 		}
 	case StashResultMsg:
 		if m.selected < len(m.repos) && msg.RepoPath == m.repos[m.selected].Path {
@@ -148,7 +148,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "1":
 		if m.mode != ModeBranches {
 			m.mode = ModeBranches
-			return m, m.fetchWorktrees()
+			return m, m.fetchBranches()
 		}
 	case "2":
 		if m.mode != ModeStashes {
@@ -180,7 +180,7 @@ func (m Model) View() string {
 		Width:         m.width,
 		Height:        m.height,
 		Mode:          int(m.mode),
-		Worktrees:     m.worktrees,
+		Branches:      m.branches,
 		Stashes:       m.stashes,
 		StashSelected: m.stashSelected,
 		Overlay:       int(m.overlay),
@@ -192,21 +192,21 @@ func (m Model) View() string {
 func (m Model) fetchForMode() tea.Cmd {
 	switch m.mode {
 	case ModeBranches:
-		return m.fetchWorktrees()
+		return m.fetchBranches()
 	case ModeStashes:
 		return m.fetchStashes()
 	}
 	return nil
 }
 
-func (m Model) fetchWorktrees() tea.Cmd {
+func (m Model) fetchBranches() tea.Cmd {
 	if len(m.repos) == 0 {
 		return nil
 	}
 	repoPath := m.repos[m.selected].Path
 	return func() tea.Msg {
-		wts, _ := gitquery.ListWorktrees(repoPath)
-		return WorktreeResultMsg{RepoPath: repoPath, Worktrees: wts}
+		branches, _ := gitquery.ListBranches(repoPath)
+		return BranchResultMsg{RepoPath: repoPath, Branches: branches}
 	}
 }
 
