@@ -26,6 +26,7 @@ var (
 	stashDateStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	stashMsgStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
 	stashSelStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true).Reverse(true)
+	branchSelStyle    = lipgloss.NewStyle().Bold(true).Reverse(true)
 	noUpstreamStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
 	aheadBehindStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
 	dirtyRedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
@@ -36,17 +37,18 @@ var (
 
 // RenderParams holds everything the renderer needs.
 type RenderParams struct {
-	Repos         []scanner.Repo
-	Selected      int
-	Width         int
-	Height        int
-	Mode          int
-	Branches      []gitquery.Branch
-	Stashes       []gitquery.Stash
-	StashSelected int
-	Overlay       int
-	OverlayDiff   string
-	OverlayScroll int
+	Repos          []scanner.Repo
+	Selected       int
+	Width          int
+	Height         int
+	Mode           int
+	Branches       []gitquery.Branch
+	Stashes        []gitquery.Stash
+	BranchSelected int
+	StashSelected  int
+	Overlay        int
+	OverlayDiff    string
+	OverlayScroll  int
 }
 
 // Render produces the full terminal view string.
@@ -78,7 +80,7 @@ func Render(p RenderParams) string {
 	var rightLines []string
 	switch {
 	case p.Mode == 1 && len(p.Branches) > 0:
-		rightLines = renderBranchPane(p.Branches, rightWidth, contentHeight)
+		rightLines = renderBranchPaneSelected(p.Branches, p.BranchSelected, rightWidth, contentHeight)
 	case p.Mode == 2 && len(p.Stashes) > 0:
 		rightLines = renderStashPane(p.Stashes, p.StashSelected, rightWidth, contentHeight)
 	default:
@@ -126,7 +128,7 @@ func RenderStatusBar(width, mode, overlay int) string {
 	} else if mode == 2 {
 		hints = "  ↑/↓ select  enter: diff  tab: repo  ←/→: mode  q/esc: quit"
 	} else {
-		hints = "  " + cleanStyle.Render("✔") + " clean  " + aheadBehindStyle.Render("●") + " ahead/behind  " + dirtyRedStyle.Render("●") + " dirty  " + noUpstreamStyle.Render("●") + " no upstream  tab: repo  ←/→: mode  q/esc: quit"
+		hints = "  ↑/↓ enter  " + cleanStyle.Render("✔") + " clean  " + aheadBehindStyle.Render("●") + " ahead/behind  " + dirtyRedStyle.Render("●") + " dirty  " + noUpstreamStyle.Render("●") + " no upstream  tab: repo  ←/→: mode  q/esc: quit"
 	}
 
 	text := "  " + strings.Join(parts, " ") + hints
@@ -162,7 +164,12 @@ func renderRepoList(repos []scanner.Repo, selected, height int) []string {
 }
 
 func renderBranchPane(branches []gitquery.Branch, width, height int) []string {
+	return renderBranchPaneSelected(branches, 0, width, height)
+}
+
+func renderBranchPaneSelected(branches []gitquery.Branch, selected, width, height int) []string {
 	var content []string
+	diffableIndex := 0
 
 	for _, b := range branches {
 		branch := branchStyle.Render(b.Name)
@@ -192,7 +199,13 @@ func renderBranchPane(branches []gitquery.Branch, width, height int) []string {
 		}
 
 		line := "  " + branch + indicators + annotation
+		if b.Dirty && b.IsWorktree && diffableIndex == selected {
+			line = branchSelStyle.Render(" > " + strings.TrimPrefix(line, "  "))
+		}
 		content = append(content, line)
+		if b.Dirty && b.IsWorktree {
+			diffableIndex++
+		}
 
 		// Unpushed commits (max 5)
 		maxShow := 5

@@ -34,7 +34,7 @@ WORKTREE_ROOT=~/projects ./bin/wt
 | `←`/`h` | Switch to previous mode |
 | `→`/`l` | Switch to next mode |
 | `1`/`2` | Jump to branches / stashes mode |
-| `enter` | View stash diff (stashes mode) |
+| `enter` | View dirty branch diff in branches mode or stash diff in stashes mode |
 | `esc`/`q` | Close overlay or quit |
 
 ### Branches view (mode 1)
@@ -46,7 +46,7 @@ The right pane shows all local branches alphabetically with stacking indicators:
 - `●` red: dirty worktree — shows `N files +X/-Y` (lines added/deleted)
 - `●` purple: no upstream or upstream gone
 
-Worktree branches are annotated with `[<path>]`. If the same branch is checked out in more than one worktree, the UI shows `[<path1>, <path2>, ...]`. Detached worktrees appear as `(detached)` rows with their path annotation. Branches ahead of upstream show up to 5 unpushed commit messages, with overflow count.
+Worktree branches are annotated with `[<path>]`. If the same branch is checked out in more than one worktree, the UI shows `[<path1>, <path2>, ...]`. Detached worktrees appear as `(detached)` rows with their path annotation. Branches ahead of upstream show up to 5 unpushed commit messages, with overflow count. When a branch is dirty and is a worktree, `enter` opens a full-screen diff overlay for that worktree.
 
 ### Stashes view (mode 2)
 

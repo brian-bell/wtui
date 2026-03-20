@@ -216,6 +216,128 @@ func TestModel_ModeSwitchPreservesSelection(t *testing.T) {
 	}
 }
 
+func TestModel_BranchCursorSkipsNonDiffableBranches(t *testing.T) {
+	branches := []gitquery.Branch{
+		{Name: "clean-1"},
+		{Name: "dirty-1", IsWorktree: true, Dirty: true, WorktreePaths: []string{"/dev/alpha"}},
+		{Name: "clean-2"},
+		{Name: "dirty-2", IsWorktree: true, Dirty: true, WorktreePaths: []string{"/dev/alpha"}},
+	}
+
+	m := model.New(testRepos())
+	m, _ = update(m, model.BranchResultMsg{
+		RepoPath: "/dev/alpha",
+		Branches: branches,
+	})
+
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected diff cmd for first dirty branch, got nil")
+	}
+	msg := cmd()
+	diffMsg, ok := msg.(model.BranchDiffResultMsg)
+	if !ok {
+		t.Fatalf("expected BranchDiffResultMsg, got %T", msg)
+	}
+	if diffMsg.BranchName != "dirty-1" {
+		t.Fatalf("expected first diffable branch dirty-1, got %q", diffMsg.BranchName)
+	}
+
+	m2 := model.New(testRepos())
+	m2, _ = update(m2, model.BranchResultMsg{RepoPath: "/dev/alpha", Branches: branches})
+	m2, _ = update(m2, tea.KeyMsg{Type: tea.KeyDown})
+	m2, cmd = update(m2, tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected diff cmd for second dirty branch, got nil")
+	}
+	msg = cmd()
+	diffMsg, ok = msg.(model.BranchDiffResultMsg)
+	if !ok {
+		t.Fatalf("expected BranchDiffResultMsg, got %T", msg)
+	}
+	if diffMsg.BranchName != "dirty-2" {
+		t.Fatalf("expected second diffable branch dirty-2, got %q", diffMsg.BranchName)
+	}
+
+	m3 := model.New(testRepos())
+	m3, _ = update(m3, model.BranchResultMsg{RepoPath: "/dev/alpha", Branches: branches})
+	m3, _ = update(m3, tea.KeyMsg{Type: tea.KeyDown})
+	m3, _ = update(m3, tea.KeyMsg{Type: tea.KeyDown})
+	m3, cmd = update(m3, tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected diff cmd after clamping at last dirty branch, got nil")
+	}
+	msg = cmd()
+	diffMsg, ok = msg.(model.BranchDiffResultMsg)
+	if !ok {
+		t.Fatalf("expected BranchDiffResultMsg, got %T", msg)
+	}
+	if diffMsg.BranchName != "dirty-2" {
+		t.Fatalf("expected cursor to clamp at dirty-2, got %q", diffMsg.BranchName)
+	}
+}
+
+func TestModel_EnterOpensBranchDiffOverlayForDirtyWorktree(t *testing.T) {
+	m := model.New(testRepos())
+	branches := []gitquery.Branch{
+		{
+			Name:          "feat",
+			IsWorktree:    true,
+			Dirty:         true,
+			WorktreePaths: []string{"/dev/alpha"},
+		},
+		{Name: "main"},
+	}
+	m, _ = update(m, model.BranchResultMsg{RepoPath: "/dev/alpha", Branches: branches})
+
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.Overlay() != model.OverlayBranchDiff {
+		t.Errorf("expected OverlayBranchDiff, got %d", m.Overlay())
+	}
+	if cmd == nil {
+		t.Fatal("expected fetchBranchDiff cmd, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.BranchDiffResultMsg); !ok {
+		t.Errorf("expected BranchDiffResultMsg, got %T", msg)
+	}
+}
+
+func TestModel_EnterDoesNothingForCleanBranch(t *testing.T) {
+	m := model.New(testRepos())
+	branches := []gitquery.Branch{
+		{
+			Name:       "feat",
+			IsWorktree: true,
+			Dirty:      false,
+		},
+	}
+	m, _ = update(m, model.BranchResultMsg{RepoPath: "/dev/alpha", Branches: branches})
+
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.Overlay() != model.OverlayNone {
+		t.Errorf("expected OverlayNone, got %d", m.Overlay())
+	}
+	if cmd != nil {
+		t.Fatalf("expected no command for clean branch, got %T", cmd)
+	}
+}
+
+func TestModel_StaleBranchDiffResultDiscarded(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyTab}) // select bravo
+
+	m, _ = update(m, model.BranchDiffResultMsg{
+		RepoPath:   "/dev/alpha",
+		BranchName: "feat",
+		Diff:       "diff --git a/f.txt b/f.txt",
+	})
+
+	if m.OverlayDiff() != "" {
+		t.Errorf("expected stale branch diff discarded, got %q", m.OverlayDiff())
+	}
+}
+
 func TestModel_InitFiresFetchBranches(t *testing.T) {
 	m := model.New(testRepos())
 	cmd := m.Init()
