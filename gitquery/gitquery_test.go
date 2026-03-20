@@ -33,7 +33,20 @@ func initRepo(t *testing.T, dir string) {
 	run(t, dir, "git", "commit", "-m", "init")
 }
 
-func run(t *testing.T, dir string, name string, args ...string) {
+// initBranchRepo creates a git repo in a new temp dir with one commit. Returns the dir.
+func initBranchRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	run(t, dir, "git", "init")
+	run(t, dir, "git", "config", "user.email", "test@test.com")
+	run(t, dir, "git", "config", "user.name", "Test")
+	writeFile(t, dir, "README.md", "init")
+	run(t, dir, "git", "add", ".")
+	run(t, dir, "git", "commit", "-m", "initial")
+	return dir
+}
+
+func run(t *testing.T, dir string, name string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
@@ -41,7 +54,40 @@ func run(t *testing.T, dir string, name string, args ...string) {
 	if err != nil {
 		t.Fatalf("%s %v failed: %v\n%s", name, args, err, out)
 	}
+	return string(out)
 }
+
+func writeFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// initBareUpstream creates a bare repo and sets it as the remote "origin" for repo.
+func initBareUpstream(t *testing.T, repo string) string {
+	t.Helper()
+	bare := t.TempDir()
+	run(t, bare, "git", "init", "--bare")
+	run(t, repo, "git", "remote", "add", "origin", bare)
+	run(t, repo, "git", "push", "-u", "origin", "HEAD")
+	return bare
+}
+
+func findBranch(branches []gitquery.Branch, name string) *gitquery.Branch {
+	for i := range branches {
+		if branches[i].Name == name {
+			return &branches[i]
+		}
+	}
+	return nil
+}
+
+// --- Worktree tests ---
 
 func TestListWorktrees_SingleMainWorktree(t *testing.T) {
 	dir := realPath(t, t.TempDir())
@@ -394,5 +440,317 @@ func TestStashDiff_InvalidIndex(t *testing.T) {
 	_, err := gitquery.StashDiff(dir, 99)
 	if err == nil {
 		t.Fatal("expected error for invalid stash index, got nil")
+	}
+}
+
+// --- Branch tests ---
+
+func TestListBranches_DiscoversSortedBranches(t *testing.T) {
+	repo := initBranchRepo(t)
+
+	run(t, repo, "git", "branch", "feature-zulu")
+	run(t, repo, "git", "branch", "feature-alpha")
+
+	branches, err := gitquery.ListBranches(repo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(branches) != 3 {
+		t.Fatalf("expected 3 branches, got %d", len(branches))
+	}
+
+	names := make([]string, len(branches))
+	for i, b := range branches {
+		names[i] = b.Name
+	}
+
+	if names[0] != "feature-alpha" {
+		t.Errorf("expected first branch %q, got %q", "feature-alpha", names[0])
+	}
+	if names[1] != "feature-zulu" {
+		t.Errorf("expected second branch %q, got %q", "feature-zulu", names[1])
+	}
+	if names[2] != "main" && names[2] != "master" {
+		t.Errorf("expected third branch to be main or master, got %q", names[2])
+	}
+}
+
+func TestListBranches_UpstreamAheadBehind(t *testing.T) {
+	repo := initBranchRepo(t)
+	initBareUpstream(t, repo)
+
+	run(t, repo, "git", "checkout", "-b", "feature")
+	writeFile(t, repo, "a.txt", "hello")
+	run(t, repo, "git", "add", ".")
+	run(t, repo, "git", "commit", "-m", "local commit 1")
+	writeFile(t, repo, "b.txt", "world")
+	run(t, repo, "git", "add", ".")
+	run(t, repo, "git", "commit", "-m", "local commit 2")
+	run(t, repo, "git", "push", "-u", "origin", "feature")
+
+	writeFile(t, repo, "c.txt", "ahead")
+	run(t, repo, "git", "add", ".")
+	run(t, repo, "git", "commit", "-m", "unpushed commit")
+
+	branches, err := gitquery.ListBranches(repo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	b := findBranch(branches, "feature")
+	if b == nil {
+		t.Fatal("branch 'feature' not found")
+	}
+
+	if !b.HasUpstream {
+		t.Error("expected HasUpstream = true")
+	}
+	if b.Ahead != 1 {
+		t.Errorf("expected Ahead = 1, got %d", b.Ahead)
+	}
+	if b.Behind != 0 {
+		t.Errorf("expected Behind = 0, got %d", b.Behind)
+	}
+}
+
+func TestListBranches_UpstreamGone(t *testing.T) {
+	repo := initBranchRepo(t)
+	bare := initBareUpstream(t, repo)
+
+	run(t, repo, "git", "checkout", "-b", "doomed")
+	writeFile(t, repo, "x.txt", "bye")
+	run(t, repo, "git", "add", ".")
+	run(t, repo, "git", "commit", "-m", "doomed commit")
+	run(t, repo, "git", "push", "-u", "origin", "doomed")
+
+	run(t, bare, "git", "branch", "-D", "doomed")
+	run(t, repo, "git", "fetch", "--prune")
+
+	branches, err := gitquery.ListBranches(repo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	b := findBranch(branches, "doomed")
+	if b == nil {
+		t.Fatal("branch 'doomed' not found")
+	}
+
+	if !b.HasUpstream {
+		t.Error("expected HasUpstream = true")
+	}
+	if !b.UpstreamGone {
+		t.Error("expected UpstreamGone = true")
+	}
+}
+
+func TestListBranches_NoUpstream(t *testing.T) {
+	repo := initBranchRepo(t)
+
+	run(t, repo, "git", "branch", "local-only")
+
+	branches, err := gitquery.ListBranches(repo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	b := findBranch(branches, "local-only")
+	if b == nil {
+		t.Fatal("branch 'local-only' not found")
+	}
+
+	if b.HasUpstream {
+		t.Error("expected HasUpstream = false")
+	}
+	if b.Ahead != 0 {
+		t.Errorf("expected Ahead = 0, got %d", b.Ahead)
+	}
+	if b.Behind != 0 {
+		t.Errorf("expected Behind = 0, got %d", b.Behind)
+	}
+}
+
+func TestListBranches_WorktreeAnnotation(t *testing.T) {
+	repo := realPath(t, initBranchRepo(t))
+
+	wtDir := realPath(t, t.TempDir())
+	wtPath := filepath.Join(wtDir, "wt-feature")
+	run(t, repo, "git", "branch", "wt-branch")
+	run(t, repo, "git", "worktree", "add", wtPath, "wt-branch")
+
+	branches, err := gitquery.ListBranches(repo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	b := findBranch(branches, "wt-branch")
+	if b == nil {
+		t.Fatal("branch 'wt-branch' not found")
+	}
+
+	if !b.IsWorktree {
+		t.Error("expected IsWorktree = true")
+	}
+	if b.WorktreePath != wtPath {
+		t.Errorf("expected WorktreePath %q, got %q", wtPath, b.WorktreePath)
+	}
+
+	defaultName := strings.TrimSpace(run(t, repo, "git", "branch", "--show-current"))
+	db := findBranch(branches, defaultName)
+	if db == nil {
+		t.Fatalf("default branch %q not found", defaultName)
+	}
+	if !db.IsWorktree {
+		t.Errorf("expected default branch %q to be a worktree", defaultName)
+	}
+	if db.WorktreePath != repo {
+		t.Errorf("expected WorktreePath %q, got %q", repo, db.WorktreePath)
+	}
+}
+
+func TestListBranches_DirtyWorktree(t *testing.T) {
+	repo := realPath(t, initBranchRepo(t))
+
+	wtDir := realPath(t, t.TempDir())
+	wtPath := filepath.Join(wtDir, "wt-dirty")
+	run(t, repo, "git", "branch", "dirty-branch")
+	run(t, repo, "git", "worktree", "add", wtPath, "dirty-branch")
+
+	writeFile(t, wtPath, "README.md", "modified content\nadded line\n")
+	writeFile(t, wtPath, "new-file.txt", "new content\n")
+	run(t, wtPath, "git", "add", "new-file.txt")
+
+	branches, err := gitquery.ListBranches(repo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	b := findBranch(branches, "dirty-branch")
+	if b == nil {
+		t.Fatal("branch 'dirty-branch' not found")
+	}
+
+	if !b.Dirty {
+		t.Error("expected Dirty = true")
+	}
+	if b.FilesChanged == 0 {
+		t.Error("expected FilesChanged > 0")
+	}
+	if b.LinesAdded == 0 {
+		t.Error("expected LinesAdded > 0")
+	}
+	if b.LinesDeleted == 0 {
+		t.Error("expected LinesDeleted > 0")
+	}
+}
+
+func TestListBranches_UnpushedCommits(t *testing.T) {
+	repo := initBranchRepo(t)
+	initBareUpstream(t, repo)
+
+	run(t, repo, "git", "checkout", "-b", "unpushed-branch")
+	run(t, repo, "git", "push", "-u", "origin", "unpushed-branch")
+
+	writeFile(t, repo, "a.txt", "one")
+	run(t, repo, "git", "add", ".")
+	run(t, repo, "git", "commit", "-m", "first unpushed")
+	writeFile(t, repo, "b.txt", "two")
+	run(t, repo, "git", "add", ".")
+	run(t, repo, "git", "commit", "-m", "second unpushed")
+
+	branches, err := gitquery.ListBranches(repo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	b := findBranch(branches, "unpushed-branch")
+	if b == nil {
+		t.Fatal("branch 'unpushed-branch' not found")
+	}
+
+	if len(b.Unpushed) != 2 {
+		t.Fatalf("expected 2 unpushed commits, got %d: %v", len(b.Unpushed), b.Unpushed)
+	}
+	if !strings.Contains(b.Unpushed[0], "second unpushed") {
+		t.Errorf("expected first unpushed to contain %q, got %q", "second unpushed", b.Unpushed[0])
+	}
+	if !strings.Contains(b.Unpushed[1], "first unpushed") {
+		t.Errorf("expected second unpushed to contain %q, got %q", "first unpushed", b.Unpushed[1])
+	}
+}
+
+func TestListBranches_UntrackedOnlyDirtyWorktree(t *testing.T) {
+	repo := realPath(t, initBranchRepo(t))
+
+	wtDir := realPath(t, t.TempDir())
+	wtPath := filepath.Join(wtDir, "wt-untracked")
+	run(t, repo, "git", "branch", "untracked-branch")
+	run(t, repo, "git", "worktree", "add", wtPath, "untracked-branch")
+
+	// Only create an untracked file (don't stage it)
+	writeFile(t, wtPath, "untracked.txt", "new content\n")
+
+	branches, err := gitquery.ListBranches(repo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	b := findBranch(branches, "untracked-branch")
+	if b == nil {
+		t.Fatal("branch 'untracked-branch' not found")
+	}
+
+	if !b.Dirty {
+		t.Error("expected Dirty = true")
+	}
+	if b.FilesChanged != 1 {
+		t.Errorf("expected FilesChanged = 1, got %d", b.FilesChanged)
+	}
+}
+
+func TestBranchDiff_ReturnsDiffForDirtyWorktree(t *testing.T) {
+	repo := realPath(t, initBranchRepo(t))
+
+	wtDir := realPath(t, t.TempDir())
+	wtPath := filepath.Join(wtDir, "wt-diff")
+	run(t, repo, "git", "branch", "diff-branch")
+	run(t, repo, "git", "worktree", "add", wtPath, "diff-branch")
+
+	writeFile(t, wtPath, "README.md", "changed\n")
+	writeFile(t, wtPath, "staged.txt", "staged content\n")
+	run(t, wtPath, "git", "add", "staged.txt")
+
+	diff, err := gitquery.BranchDiff(wtPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(diff, "diff --git") {
+		t.Error("expected diff output to contain 'diff --git'")
+	}
+	if !strings.Contains(diff, "changed") {
+		t.Error("expected diff output to contain unstaged changes")
+	}
+	if !strings.Contains(diff, "staged content") {
+		t.Error("expected diff output to contain staged changes")
+	}
+}
+
+func TestBranchDiff_EmptyForCleanWorktree(t *testing.T) {
+	repo := realPath(t, initBranchRepo(t))
+
+	wtDir := realPath(t, t.TempDir())
+	wtPath := filepath.Join(wtDir, "wt-clean")
+	run(t, repo, "git", "branch", "clean-branch")
+	run(t, repo, "git", "worktree", "add", wtPath, "clean-branch")
+
+	diff, err := gitquery.BranchDiff(wtPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if diff != "" {
+		t.Errorf("expected empty diff, got %q", diff)
 	}
 }
