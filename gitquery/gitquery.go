@@ -3,6 +3,7 @@ package gitquery
 import (
 	"fmt"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -153,4 +154,181 @@ func fillStatus(wt *Worktree) {
 			wt.Unpushed = append(wt.Unpushed, line)
 		}
 	}
+}
+
+// Branch represents a local git branch with its status.
+type Branch struct {
+	Name         string
+	HasUpstream  bool
+	UpstreamGone bool
+	Ahead        int
+	Behind       int
+	Unpushed     []string
+	IsWorktree   bool
+	WorktreePath string
+	Dirty        bool
+	FilesChanged int
+	LinesAdded   int
+	LinesDeleted int
+}
+
+const refFormat = "%(refname:short)\t%(upstream)\t%(upstream:track)"
+
+// ListBranches returns all local branches sorted alphabetically by name.
+func ListBranches(repoPath string) ([]Branch, error) {
+	out, err := gitCmd(repoPath, "for-each-ref", "--format="+refFormat, "refs/heads/")
+	if err != nil {
+		return nil, err
+	}
+
+	wtMap, err := branchWorktreeMap(repoPath)
+	if err != nil {
+		return nil, err
+	}
+
+	lines := splitLines(out)
+	branches := make([]Branch, 0, len(lines))
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		b, upstream := parseBranchLine(line)
+
+		if b.HasUpstream && !b.UpstreamGone {
+			ahead, behind, err := branchAheadBehind(repoPath, b.Name, upstream)
+			if err == nil {
+				b.Ahead = ahead
+				b.Behind = behind
+			}
+			if b.Ahead > 0 {
+				b.Unpushed = unpushedCommits(repoPath, b.Name, upstream)
+			}
+		}
+
+		if wtPath, ok := wtMap[b.Name]; ok {
+			b.IsWorktree = true
+			b.WorktreePath = wtPath
+			populateDirtyStatus(&b)
+		}
+
+		branches = append(branches, b)
+	}
+
+	sort.Slice(branches, func(i, j int) bool {
+		return branches[i].Name < branches[j].Name
+	})
+
+	return branches, nil
+}
+
+// BranchDiff returns the diff output for a worktree.
+func BranchDiff(repoPath, worktreePath string) (string, error) {
+	return gitCmd(worktreePath, "diff")
+}
+
+// branchWorktreeMap returns a map of branch name -> worktree path.
+func branchWorktreeMap(repoPath string) (map[string]string, error) {
+	out, err := gitCmd(repoPath, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+
+	m := make(map[string]string)
+	var currentPath string
+	for _, line := range strings.Split(out, "\n") {
+		if after, ok := strings.CutPrefix(line, "worktree "); ok {
+			currentPath = after
+		}
+		if after, ok := strings.CutPrefix(line, "branch "); ok {
+			name := strings.TrimPrefix(after, "refs/heads/")
+			m[name] = currentPath
+		}
+	}
+	return m, nil
+}
+
+func parseBranchLine(line string) (Branch, string) {
+	parts := strings.SplitN(line, "\t", 3)
+	b := Branch{Name: parts[0]}
+
+	var upstream string
+	if len(parts) > 1 && parts[1] != "" {
+		b.HasUpstream = true
+		upstream = parts[1]
+		if len(parts) > 2 && strings.Contains(parts[2], "gone") {
+			b.UpstreamGone = true
+		}
+	}
+
+	return b, upstream
+}
+
+func branchAheadBehind(repoPath, branchName, upstream string) (int, int, error) {
+	out, err := gitCmd(repoPath, "rev-list", "--count", "--left-right", branchName+"..."+upstream)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	parts := strings.Fields(strings.TrimSpace(out))
+	if len(parts) != 2 {
+		return 0, 0, nil
+	}
+
+	ahead, _ := strconv.Atoi(parts[0])
+	behind, _ := strconv.Atoi(parts[1])
+	return ahead, behind, nil
+}
+
+func unpushedCommits(repoPath, branchName, upstream string) []string {
+	out, err := gitCmd(repoPath, "log", "--oneline", upstream+".."+branchName)
+	if err != nil {
+		return nil
+	}
+	return splitLines(out)
+}
+
+func populateDirtyStatus(b *Branch) {
+	statusOut, err := gitCmd(b.WorktreePath, "status", "--porcelain")
+	if err != nil {
+		return
+	}
+	statusLines := splitLines(statusOut)
+	if len(statusLines) == 0 {
+		return
+	}
+	b.Dirty = true
+
+	diffOut, err := gitCmd(b.WorktreePath, "diff", "HEAD", "--numstat")
+	if err != nil {
+		return
+	}
+	for _, line := range splitLines(diffOut) {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		b.FilesChanged++
+		added, _ := strconv.Atoi(fields[0])
+		deleted, _ := strconv.Atoi(fields[1])
+		b.LinesAdded += added
+		b.LinesDeleted += deleted
+	}
+}
+
+func gitCmd(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+func splitLines(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\n")
 }
