@@ -32,6 +32,22 @@ func TestStatusBar_ActiveModeIsBracketed(t *testing.T) {
 	}
 }
 
+func TestStatusBar_Mode1ContainsIndicatorLegend(t *testing.T) {
+	bar := RenderStatusBar(120, 1, 0)
+	for _, legend := range []string{"✔ clean", "● dirty", "● no upstream"} {
+		if !strings.Contains(bar, legend) {
+			t.Errorf("mode 1 status bar should contain legend %q", legend)
+		}
+	}
+}
+
+func TestStatusBar_Mode2OmitsIndicatorLegend(t *testing.T) {
+	bar := RenderStatusBar(120, 2, 0)
+	if strings.Contains(bar, "clean") {
+		t.Error("mode 2 status bar should not contain indicator legend")
+	}
+}
+
 func TestStatusBar_ContainsHints(t *testing.T) {
 	bar := RenderStatusBar(120, 1, 0)
 	for _, hint := range []string{"tab: repo", "←/→: mode", "q/esc: quit"} {

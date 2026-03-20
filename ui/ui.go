@@ -125,7 +125,7 @@ func RenderStatusBar(width, mode, overlay int) string {
 	} else if mode == 2 {
 		hints = "  ↑/↓ select  enter: diff  tab: repo  ←/→: mode  q/esc: quit"
 	} else {
-		hints = "  tab: repo  ←/→: mode  q/esc: quit"
+		hints = "  " + cleanStyle.Render("✔") + " clean  " + dirtyStyle.Render("●") + " dirty  " + noUpstreamStyle.Render("●") + " no upstream  tab: repo  ←/→: mode  q/esc: quit"
 	}
 
 	text := "  " + strings.Join(parts, " ") + hints

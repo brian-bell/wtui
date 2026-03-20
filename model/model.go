@@ -194,7 +194,6 @@ func (m Model) fetchForMode() tea.Cmd {
 	case ModeBranches:
 		return m.fetchWorktrees()
 	case ModeStashes:
-		m.stashSelected = 0
 		return m.fetchStashes()
 	}
 	return nil
