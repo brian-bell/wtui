@@ -227,6 +227,42 @@ func TestBranchPane_NonWorktreeNoAnnotation(t *testing.T) {
 	}
 }
 
+func TestRender_HighlightsSelectedDiffableBranch(t *testing.T) {
+	view := Render(RenderParams{
+		Repos:    []scanner.Repo{{Path: "/a", DisplayName: "alpha"}},
+		Selected: 0,
+		Width:    80,
+		Height:   10,
+		Mode:     1,
+		Branches: []gitquery.Branch{
+			{Name: "clean"},
+			{Name: "dirty", IsWorktree: true, Dirty: true, WorktreePaths: []string{"/a"}},
+		},
+		BranchSelected: 0,
+	})
+	if !strings.Contains(view, "> dirty") {
+		t.Error("selected diffable branch should render with a visible cursor")
+	}
+	if strings.Contains(view, "> clean") {
+		t.Error("non-diffable branch should not be highlighted")
+	}
+}
+
+func TestRender_HidesBranchCursorWhenNoDiffableBranches(t *testing.T) {
+	view := Render(RenderParams{
+		Repos:          []scanner.Repo{{Path: "/a", DisplayName: "alpha"}},
+		Selected:       0,
+		Width:          80,
+		Height:         10,
+		Mode:           1,
+		Branches:       []gitquery.Branch{{Name: "clean-1"}, {Name: "clean-2"}},
+		BranchSelected: 0,
+	})
+	if strings.Contains(view, "> clean-1") || strings.Contains(view, "> clean-2") {
+		t.Error("branch cursor should be hidden when there are no diffable branches")
+	}
+}
+
 func TestBranchPane_UnpushedCommitsShown(t *testing.T) {
 	branches := []gitquery.Branch{
 		{Name: "feat", HasUpstream: true, Ahead: 2,
