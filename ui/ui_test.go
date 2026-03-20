@@ -179,12 +179,40 @@ func TestBranchPane_StacksAheadAndDirtyIndicators(t *testing.T) {
 
 func TestBranchPane_WorktreeAnnotation(t *testing.T) {
 	branches := []gitquery.Branch{
-		{Name: "feat", HasUpstream: true, IsWorktree: true, WorktreePath: "/dev/proj-feat"},
+		{Name: "feat", HasUpstream: true, IsWorktree: true, WorktreePaths: []string{"/dev/proj-feat"}},
 	}
 	lines := renderBranchPane(branches, 60, 10)
 	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "[wt: /dev/proj-feat]") {
-		t.Error("worktree branch should show [wt: <path>] annotation")
+	if !strings.Contains(joined, "[/dev/proj-feat]") {
+		t.Error("worktree branch should show [<path>] annotation")
+	}
+}
+
+func TestBranchPane_DuplicateWorktreeAnnotation(t *testing.T) {
+	branches := []gitquery.Branch{
+		{Name: "feat", HasUpstream: true, IsWorktree: true, WorktreePaths: []string{"/dev/proj-feat", "/tmp/proj-feat-copy"}},
+	}
+	lines := renderBranchPane(branches, 80, 10)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "/dev/proj-feat") || !strings.Contains(joined, "/tmp/proj-feat-copy") {
+		t.Error("duplicate worktree branch should show both paths")
+	}
+	if strings.Contains(joined, "duplicate") || strings.Contains(joined, "wt:") {
+		t.Error("duplicate worktree branch should not show labels")
+	}
+}
+
+func TestBranchPane_DetachedWorktreeRow(t *testing.T) {
+	branches := []gitquery.Branch{
+		{Name: "(detached)", IsWorktree: true, WorktreePaths: []string{"/tmp/wt-detached"}},
+	}
+	lines := renderBranchPane(branches, 80, 10)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "(detached)") {
+		t.Error("detached worktree should render as a detached row")
+	}
+	if !strings.Contains(joined, "[/tmp/wt-detached]") {
+		t.Error("detached worktree should show its path annotation")
 	}
 }
 
@@ -194,7 +222,7 @@ func TestBranchPane_NonWorktreeNoAnnotation(t *testing.T) {
 	}
 	lines := renderBranchPane(branches, 60, 10)
 	joined := strings.Join(lines, "\n")
-	if strings.Contains(joined, "[wt:") {
+	if strings.Contains(joined, "[wt:") || strings.Contains(joined, "[duplicate:") {
 		t.Error("non-worktree branch should not show worktree annotation")
 	}
 }

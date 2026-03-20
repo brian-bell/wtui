@@ -358,8 +358,11 @@ func TestListBranches_WorktreeAnnotation(t *testing.T) {
 	if !b.IsWorktree {
 		t.Error("expected IsWorktree = true")
 	}
-	if b.WorktreePath != wtPath {
-		t.Errorf("expected WorktreePath %q, got %q", wtPath, b.WorktreePath)
+	if len(b.WorktreePaths) != 1 {
+		t.Fatalf("expected 1 worktree path, got %d", len(b.WorktreePaths))
+	}
+	if b.WorktreePaths[0] != wtPath {
+		t.Errorf("expected WorktreePaths[0] %q, got %q", wtPath, b.WorktreePaths[0])
 	}
 
 	defaultName := strings.TrimSpace(run(t, repo, "git", "branch", "--show-current"))
@@ -370,8 +373,80 @@ func TestListBranches_WorktreeAnnotation(t *testing.T) {
 	if !db.IsWorktree {
 		t.Errorf("expected default branch %q to be a worktree", defaultName)
 	}
-	if db.WorktreePath != repo {
-		t.Errorf("expected WorktreePath %q, got %q", repo, db.WorktreePath)
+	if len(db.WorktreePaths) != 1 {
+		t.Fatalf("expected 1 worktree path for default branch, got %d", len(db.WorktreePaths))
+	}
+	if db.WorktreePaths[0] != repo {
+		t.Errorf("expected WorktreePaths[0] %q, got %q", repo, db.WorktreePaths[0])
+	}
+}
+
+func TestListBranches_DuplicateWorktreePaths(t *testing.T) {
+	repo := realPath(t, initBranchRepo(t))
+
+	wtDir := realPath(t, t.TempDir())
+	wtPath1 := filepath.Join(wtDir, "wt-dup-1")
+	wtPath2 := filepath.Join(wtDir, "wt-dup-2")
+	run(t, repo, "git", "branch", "dup-branch")
+	run(t, repo, "git", "worktree", "add", wtPath1, "dup-branch")
+	run(t, repo, "git", "worktree", "add", "-f", wtPath2, "dup-branch")
+
+	branches, err := gitquery.ListBranches(repo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	b := findBranch(branches, "dup-branch")
+	if b == nil {
+		t.Fatal("branch 'dup-branch' not found")
+	}
+
+	if len(b.WorktreePaths) != 2 {
+		t.Fatalf("expected 2 worktree paths, got %d: %v", len(b.WorktreePaths), b.WorktreePaths)
+	}
+	got := map[string]bool{}
+	for _, path := range b.WorktreePaths {
+		got[path] = true
+	}
+	if !got[wtPath1] || !got[wtPath2] {
+		t.Fatalf("expected both paths %q and %q, got %v", wtPath1, wtPath2, b.WorktreePaths)
+	}
+}
+
+func TestListBranches_DetachedWorktreeRow(t *testing.T) {
+	repo := realPath(t, initBranchRepo(t))
+
+	wtDir := realPath(t, t.TempDir())
+	wtPath := filepath.Join(wtDir, "wt-detached")
+	run(t, repo, "git", "worktree", "add", "--detach", wtPath)
+
+	branches, err := gitquery.ListBranches(repo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var detachedCount int
+	var detached *gitquery.Branch
+	for i := range branches {
+		if branches[i].Name == "(detached)" {
+			detachedCount++
+			detached = &branches[i]
+		}
+	}
+	if detachedCount != 1 {
+		t.Fatalf("expected 1 detached row, got %d", detachedCount)
+	}
+	if detached == nil {
+		t.Fatal("detached branch not found")
+	}
+	if !detached.IsWorktree {
+		t.Error("expected detached row to be marked as a worktree")
+	}
+	if len(detached.WorktreePaths) != 1 {
+		t.Fatalf("expected 1 detached worktree path, got %d", len(detached.WorktreePaths))
+	}
+	if detached.WorktreePaths[0] != wtPath {
+		t.Errorf("expected detached path %q, got %q", wtPath, detached.WorktreePaths[0])
 	}
 }
 

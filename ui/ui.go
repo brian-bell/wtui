@@ -188,7 +188,7 @@ func renderBranchPane(branches []gitquery.Branch, width, height int) []string {
 
 		var annotation string
 		if b.IsWorktree {
-			annotation = " " + commitStyle.Render(fmt.Sprintf("[wt: %s]", b.WorktreePath))
+			annotation = formatWorktreeAnnotation(b.WorktreePaths)
 		}
 
 		line := "  " + branch + indicators + annotation
@@ -221,6 +221,21 @@ func renderBranchPane(branches []gitquery.Branch, width, height int) []string {
 		}
 	}
 	return lines
+}
+
+func formatWorktreeAnnotation(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+
+	shown := paths
+	suffix := ""
+	if len(paths) > 2 {
+		shown = paths[:2]
+		suffix = fmt.Sprintf(", +%d more", len(paths)-2)
+	}
+
+	return " " + commitStyle.Render(fmt.Sprintf("[%s%s]", strings.Join(shown, ", "), suffix))
 }
 
 func renderStashPane(stashes []gitquery.Stash, selected, width, height int) []string {
