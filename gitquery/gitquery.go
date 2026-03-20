@@ -56,37 +56,11 @@ func StashDiff(repoPath string, index int) (string, error) {
 	return out, nil
 }
 
-// Worktree represents a single git worktree with its status.
-type Worktree struct {
-	Path        string
-	Branch      string
-	IsBare      bool
-	Dirty       bool
-	HasUpstream bool
-	Ahead       int
-	Behind      int
-	Unpushed    []string
-}
-
-// ListWorktrees returns worktree information for the given repo path.
-func ListWorktrees(repoPath string) ([]Worktree, error) {
-	out, err := gitCmd(repoPath, "worktree", "list", "--porcelain")
-	if err != nil {
-		return nil, fmt.Errorf("listing worktrees: %w", err)
-	}
-
-	var worktrees []Worktree
-	for _, block := range splitWorktreeBlocks(out) {
-		wt := parseWorktreeBlock(block)
-		if wt.Path == "" {
-			continue
-		}
-		if !wt.IsBare {
-			fillStatus(&wt)
-		}
-		worktrees = append(worktrees, wt)
-	}
-	return worktrees, nil
+// worktreeInfo is internal data parsed from git worktree list output.
+type worktreeInfo struct {
+	path   string
+	branch string
+	isBare bool
 }
 
 func splitWorktreeBlocks(output string) []string {
@@ -108,46 +82,21 @@ func splitWorktreeBlocks(output string) []string {
 	return blocks
 }
 
-func parseWorktreeBlock(block string) Worktree {
-	var wt Worktree
+func parseWorktreeBlock(block string) worktreeInfo {
+	var wt worktreeInfo
 	for _, line := range strings.Split(block, "\n") {
 		switch {
 		case strings.HasPrefix(line, "worktree "):
-			wt.Path = strings.TrimPrefix(line, "worktree ")
+			wt.path = strings.TrimPrefix(line, "worktree ")
 		case strings.HasPrefix(line, "branch refs/heads/"):
-			wt.Branch = strings.TrimPrefix(line, "branch refs/heads/")
+			wt.branch = strings.TrimPrefix(line, "branch refs/heads/")
 		case line == "bare":
-			wt.IsBare = true
+			wt.isBare = true
 		case line == "detached":
-			wt.Branch = "(detached)"
+			wt.branch = "(detached)"
 		}
 	}
 	return wt
-}
-
-func fillStatus(wt *Worktree) {
-	// Dirty check
-	out, err := gitCmd(wt.Path, "status", "--porcelain")
-	if err == nil && len(strings.TrimSpace(out)) > 0 {
-		wt.Dirty = true
-	}
-
-	// Ahead/behind
-	out, err = gitCmd(wt.Path, "rev-list", "--count", "--left-right", "@{upstream}...HEAD")
-	if err == nil {
-		wt.HasUpstream = true
-		parts := strings.Fields(strings.TrimSpace(out))
-		if len(parts) == 2 {
-			wt.Behind, _ = strconv.Atoi(parts[0])
-			wt.Ahead, _ = strconv.Atoi(parts[1])
-		}
-	}
-
-	// Unpushed commit messages
-	out, err = gitCmd(wt.Path, "log", "--oneline", "@{upstream}..HEAD")
-	if err == nil {
-		wt.Unpushed = splitLines(out)
-	}
 }
 
 // Branch represents a local git branch with its status.
@@ -230,8 +179,8 @@ func branchWorktreeMap(repoPath string) (map[string]string, error) {
 	m := make(map[string]string)
 	for _, block := range splitWorktreeBlocks(out) {
 		wt := parseWorktreeBlock(block)
-		if wt.Branch != "" && !wt.IsBare {
-			m[wt.Branch] = wt.Path
+		if wt.branch != "" && !wt.isBare {
+			m[wt.branch] = wt.path
 		}
 	}
 	return m, nil

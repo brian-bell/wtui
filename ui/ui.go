@@ -19,7 +19,6 @@ var (
 	statusStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	dividerStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
 	branchStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true)
-	dirtyStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
 	cleanStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 	commitStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	activeModeStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true)
@@ -27,7 +26,9 @@ var (
 	stashDateStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	stashMsgStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
 	stashSelStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true).Reverse(true)
-	noUpstreamStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+	noUpstreamStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
+	aheadBehindStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+	dirtyRedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	diffAddStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 	diffDelStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	diffHdrStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
@@ -40,7 +41,7 @@ type RenderParams struct {
 	Width         int
 	Height        int
 	Mode          int
-	Worktrees     []gitquery.Worktree
+	Branches      []gitquery.Branch
 	Stashes       []gitquery.Stash
 	StashSelected int
 	Overlay       int
@@ -76,8 +77,8 @@ func Render(p RenderParams) string {
 
 	var rightLines []string
 	switch {
-	case p.Mode == 1 && len(p.Worktrees) > 0:
-		rightLines = renderWorktreePane(p.Worktrees, rightWidth, contentHeight)
+	case p.Mode == 1 && len(p.Branches) > 0:
+		rightLines = renderBranchPane(p.Branches, rightWidth, contentHeight)
 	case p.Mode == 2 && len(p.Stashes) > 0:
 		rightLines = renderStashPane(p.Stashes, p.StashSelected, rightWidth, contentHeight)
 	default:
@@ -125,7 +126,7 @@ func RenderStatusBar(width, mode, overlay int) string {
 	} else if mode == 2 {
 		hints = "  ↑/↓ select  enter: diff  tab: repo  ←/→: mode  q/esc: quit"
 	} else {
-		hints = "  " + cleanStyle.Render("✔") + " clean  " + dirtyStyle.Render("●") + " dirty  " + noUpstreamStyle.Render("●") + " no upstream  tab: repo  ←/→: mode  q/esc: quit"
+		hints = "  " + cleanStyle.Render("✔") + " clean  " + aheadBehindStyle.Render("●") + " ahead/behind  " + dirtyRedStyle.Render("●") + " dirty  " + noUpstreamStyle.Render("●") + " no upstream  tab: repo  ←/→: mode  q/esc: quit"
 	}
 
 	text := "  " + strings.Join(parts, " ") + hints
@@ -160,52 +161,49 @@ func renderRepoList(repos []scanner.Repo, selected, height int) []string {
 	return lines
 }
 
-func renderWorktreePane(worktrees []gitquery.Worktree, width, height int) []string {
+func renderBranchPane(branches []gitquery.Branch, width, height int) []string {
 	var content []string
 
-	needSep := false
-	for _, wt := range worktrees {
-		if wt.IsBare {
-			continue
-		}
-		if needSep {
-			content = append(content, "")
-		}
-		needSep = true
+	for _, b := range branches {
+		branch := branchStyle.Render(b.Name)
 
-		// Branch line: "  main ✔" or "  feature/auth ● +2/-1"
-		branch := branchStyle.Render(wt.Branch)
-		var status string
-		if !wt.HasUpstream {
-			status = noUpstreamStyle.Render(" ●")
-		} else if wt.Dirty {
-			status = dirtyStyle.Render(" ●")
-		} else {
-			status = cleanStyle.Render(" ✔")
+		var indicators string
+		if b.Ahead > 0 || b.Behind > 0 {
+			indicators += aheadBehindStyle.Render(" ●")
+			indicators += fmt.Sprintf(" +%d/-%d", b.Ahead, b.Behind)
+		}
+		if b.Dirty {
+			indicators += dirtyRedStyle.Render(" ●")
+			indicators += fmt.Sprintf(" %d files ", b.FilesChanged)
+			indicators += diffAddStyle.Render(fmt.Sprintf("+%d", b.LinesAdded))
+			indicators += "/" + diffDelStyle.Render(fmt.Sprintf("-%d", b.LinesDeleted))
+		}
+		if !b.HasUpstream || b.UpstreamGone {
+			indicators += noUpstreamStyle.Render(" ●")
 		}
 
-		var upstream string
-		if wt.Ahead > 0 || wt.Behind > 0 {
-			upstream = fmt.Sprintf(" +%d/-%d", wt.Ahead, wt.Behind)
+		if indicators == "" {
+			indicators = cleanStyle.Render(" ✔")
 		}
 
-		line := "  " + branch + status
-		if upstream != "" {
-			line += " " + upstream
+		var annotation string
+		if b.IsWorktree {
+			annotation = " " + commitStyle.Render(fmt.Sprintf("[wt: %s]", b.WorktreePath))
 		}
+
+		line := "  " + branch + indicators + annotation
 		content = append(content, line)
 
 		// Unpushed commits (max 5)
 		maxShow := 5
-		for j, msg := range wt.Unpushed {
+		for j, msg := range b.Unpushed {
 			if j >= maxShow {
-				remaining := len(wt.Unpushed) - maxShow
+				remaining := len(b.Unpushed) - maxShow
 				content = append(content, "    "+commitStyle.Render(fmt.Sprintf("... and %d more", remaining)))
 				break
 			}
 			content = append(content, "    "+commitStyle.Render(msg))
 		}
-
 	}
 
 	// Truncate lines to pane width

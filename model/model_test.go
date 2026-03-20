@@ -216,49 +216,78 @@ func TestModel_ModeSwitchPreservesSelection(t *testing.T) {
 	}
 }
 
-func TestModel_WorktreeResultUpdatesState(t *testing.T) {
-	m := model.New(testRepos())
-	wts := []gitquery.Worktree{
-		{Path: "/dev/alpha", Branch: "main", Dirty: false},
-	}
-	m, _ = update(m, model.WorktreeResultMsg{RepoPath: "/dev/alpha", Worktrees: wts})
-	if len(m.Worktrees()) != 1 {
-		t.Fatalf("expected 1 worktree, got %d", len(m.Worktrees()))
-	}
-	if m.Worktrees()[0].Branch != "main" {
-		t.Errorf("expected branch 'main', got %q", m.Worktrees()[0].Branch)
-	}
-}
-
-func TestModel_StaleWorktreeResultDiscarded(t *testing.T) {
-	m := model.New(testRepos())
-	// Move selection to bravo (index 1)
-	m, _ = update(m, tea.KeyMsg{Type: tea.KeyTab})
-
-	// Send result for alpha (index 0) — stale
-	wts := []gitquery.Worktree{
-		{Path: "/dev/alpha", Branch: "main"},
-	}
-	m, _ = update(m, model.WorktreeResultMsg{RepoPath: "/dev/alpha", Worktrees: wts})
-	if len(m.Worktrees()) != 0 {
-		t.Errorf("expected stale result discarded, got %d worktrees", len(m.Worktrees()))
-	}
-}
-
-func TestModel_InitFiresFetchCmd(t *testing.T) {
+func TestModel_InitFiresFetchBranches(t *testing.T) {
 	m := model.New(testRepos())
 	cmd := m.Init()
 	if cmd == nil {
-		t.Fatal("expected fetchWorktrees cmd from Init, got nil")
+		t.Fatal("expected fetchBranches cmd from Init, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.BranchResultMsg); !ok {
+		t.Errorf("expected BranchResultMsg from Init, got %T", msg)
 	}
 }
 
-func TestModel_ModeSwitchToWorktreesFiresFetchCmd(t *testing.T) {
+func TestModel_BranchResultUpdatesState(t *testing.T) {
+	m := model.New(testRepos())
+	branches := []gitquery.Branch{
+		{Name: "main", HasUpstream: true},
+		{Name: "feature", HasUpstream: true, Ahead: 1},
+	}
+	m, _ = update(m, model.BranchResultMsg{RepoPath: "/dev/alpha", Branches: branches})
+	if len(m.Branches()) != 2 {
+		t.Fatalf("expected 2 branches, got %d", len(m.Branches()))
+	}
+	if m.Branches()[0].Name != "main" {
+		t.Errorf("expected first branch 'main', got %q", m.Branches()[0].Name)
+	}
+}
+
+func TestModel_StaleBranchResultDiscarded(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyTab}) // select bravo
+	branches := []gitquery.Branch{{Name: "main"}}
+	m, _ = update(m, model.BranchResultMsg{RepoPath: "/dev/alpha", Branches: branches})
+	if len(m.Branches()) != 0 {
+		t.Errorf("expected stale result discarded, got %d branches", len(m.Branches()))
+	}
+}
+
+func TestModel_Mode1SwitchFiresFetchBranches(t *testing.T) {
 	m := model.New(testRepos())
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 	if cmd == nil {
-		t.Fatal("expected fetchWorktrees cmd on switch to mode 1, got nil")
+		t.Fatal("expected fetch cmd on switch to mode 1, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.BranchResultMsg); !ok {
+		t.Errorf("expected BranchResultMsg, got %T", msg)
+	}
+}
+
+func TestModel_ViewShowsBranchData(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	branches := []gitquery.Branch{
+		{Name: "main", HasUpstream: true},
+		{Name: "feature/auth", HasUpstream: true, Ahead: 2, Behind: 1,
+			Unpushed: []string{"abc1234 Fix login bug", "def5678 Add profile page"}},
+	}
+	m, _ = update(m, model.BranchResultMsg{RepoPath: "/dev/alpha", Branches: branches})
+
+	view := m.View()
+	if !strings.Contains(view, "main") {
+		t.Error("view should contain branch 'main'")
+	}
+	if !strings.Contains(view, "feature/auth") {
+		t.Error("view should contain branch 'feature/auth'")
+	}
+	if !strings.Contains(view, "Fix login bug") {
+		t.Error("view should contain unpushed commit message")
+	}
+	if !strings.Contains(view, "+2/-1") {
+		t.Error("view should contain ahead/behind counts")
 	}
 }
 
@@ -271,7 +300,7 @@ func TestModel_Pressing1WhileInMode1NoFetch(t *testing.T) {
 	}
 }
 
-func TestModel_DefaultModeIsWorktrees(t *testing.T) {
+func TestModel_DefaultModeIsBranches(t *testing.T) {
 	m := model.New(testRepos())
 	if m.Mode() != 1 {
 		t.Errorf("expected default mode 1, got %d", m.Mode())
@@ -291,32 +320,6 @@ func TestModel_ViewContainsExpectedContent(t *testing.T) {
 	}
 	if !strings.Contains(view, "q/esc: quit") {
 		t.Error("view should contain quit keybinding")
-	}
-}
-
-func TestModel_ViewShowsWorktreeData(t *testing.T) {
-	m := model.New(testRepos())
-	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: 24})
-	wts := []gitquery.Worktree{
-		{Path: "/dev/alpha", Branch: "main", Dirty: false, Ahead: 0},
-		{Path: "/dev/alpha-feat", Branch: "feature/auth", Dirty: true, Ahead: 2, Behind: 1,
-			Unpushed: []string{"abc1234 Fix login bug", "def5678 Add profile page"}},
-	}
-	m, _ = update(m, model.WorktreeResultMsg{RepoPath: "/dev/alpha", Worktrees: wts})
-
-	view := m.View()
-
-	if !strings.Contains(view, "main") {
-		t.Error("view should contain branch 'main'")
-	}
-	if !strings.Contains(view, "feature/auth") {
-		t.Error("view should contain branch 'feature/auth'")
-	}
-	if !strings.Contains(view, "Fix login bug") {
-		t.Error("view should contain unpushed commit message")
-	}
-	if !strings.Contains(view, "+2/-1") {
-		t.Error("view should contain ahead/behind counts")
 	}
 }
 
