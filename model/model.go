@@ -1,8 +1,11 @@
 package model
 
 import (
+	"fmt"
+
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/brian-bell/wt/actions"
 	"github.com/brian-bell/wt/gitquery"
 	"github.com/brian-bell/wt/scanner"
 	"github.com/brian-bell/wt/ui"
@@ -12,17 +15,18 @@ import (
 type Mode int
 
 const (
-	ModeBranches Mode = 1
-	ModeStashes  Mode = 2
+	ModeBranches Mode = iota + 1
+	ModeStashes
 )
 
 // OverlayState represents what overlay (if any) is displayed.
 type OverlayState int
 
 const (
-	OverlayNone       OverlayState = 0
-	OverlayStashDiff  OverlayState = 1
-	OverlayBranchDiff OverlayState = 2
+	OverlayNone OverlayState = iota
+	OverlayStashDiff
+	OverlayBranchDiff
+	OverlayConfirm
 )
 
 // BranchResultMsg is sent when branch data is fetched asynchronously.
@@ -51,6 +55,24 @@ type BranchDiffResultMsg struct {
 	Diff       string
 }
 
+// WorktreeRemovedMsg is sent when a worktree removal completes.
+type WorktreeRemovedMsg struct {
+	RepoPath string
+}
+
+// BranchDeletedMsg is sent when a branch deletion completes.
+type BranchDeletedMsg struct {
+	RepoPath string
+}
+
+// DeleteFailedMsg is sent when a delete operation fails and a force retry is available.
+type DeleteFailedMsg struct {
+	RepoPath    string
+	Target      string       // worktree path or branch name
+	ForceAction func() error // the --force variant to call
+	IsWorktree  bool
+}
+
 // Model is the bubbletea application model.
 type Model struct {
 	repos          []scanner.Repo
@@ -58,13 +80,17 @@ type Model struct {
 	width          int
 	height         int
 	mode           Mode
-	branches       []gitquery.Branch
+	rows           []gitquery.BranchRow
 	stashes        []gitquery.Stash
 	branchSelected int
 	stashSelected  int
 	overlay        OverlayState
 	overlayDiff    string
 	overlayScroll  int
+	confirmPrompt  string
+	confirmAction  func() tea.Cmd
+	confirmForce   bool
+	branchScroll   int
 }
 
 // New creates a Model from discovered repos.
@@ -72,17 +98,20 @@ func New(repos []scanner.Repo) Model {
 	return Model{repos: repos, mode: ModeBranches}
 }
 
-func (m Model) Selected() int               { return m.selected }
-func (m Model) Width() int                  { return m.width }
-func (m Model) Height() int                 { return m.height }
-func (m Model) Mode() Mode                  { return m.mode }
-func (m Model) Branches() []gitquery.Branch { return m.branches }
-func (m Model) Stashes() []gitquery.Stash   { return m.stashes }
-func (m Model) BranchSelected() int         { return m.branchSelected }
-func (m Model) StashSelected() int          { return m.stashSelected }
-func (m Model) Overlay() OverlayState       { return m.overlay }
-func (m Model) OverlayDiff() string         { return m.overlayDiff }
-func (m Model) OverlayScroll() int          { return m.overlayScroll }
+func (m Model) Selected() int              { return m.selected }
+func (m Model) Width() int                 { return m.width }
+func (m Model) Height() int                { return m.height }
+func (m Model) Mode() Mode                 { return m.mode }
+func (m Model) Rows() []gitquery.BranchRow { return m.rows }
+func (m Model) Stashes() []gitquery.Stash  { return m.stashes }
+func (m Model) BranchSelected() int        { return m.branchSelected }
+func (m Model) StashSelected() int         { return m.stashSelected }
+func (m Model) Overlay() OverlayState      { return m.overlay }
+func (m Model) OverlayDiff() string        { return m.overlayDiff }
+func (m Model) OverlayScroll() int         { return m.overlayScroll }
+func (m Model) ConfirmPrompt() string      { return m.confirmPrompt }
+func (m Model) ConfirmForce() bool         { return m.confirmForce }
+func (m Model) BranchScroll() int          { return m.branchScroll }
 
 func (m Model) Init() tea.Cmd {
 	return m.fetchBranches()
@@ -94,8 +123,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 	case BranchResultMsg:
 		if m.selected < len(m.repos) && msg.RepoPath == m.repos[m.selected].Path {
-			m.branches = msg.Branches
-			if count := diffableBranchCount(m.branches); count == 0 || m.branchSelected >= count {
+			m.rows = gitquery.FlattenBranches(msg.Branches)
+			if len(m.rows) == 0 || m.branchSelected >= len(m.rows) {
 				m.branchSelected = 0
 			}
 		}
@@ -109,8 +138,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case BranchDiffResultMsg:
 		if m.selected < len(m.repos) && msg.RepoPath == m.repos[m.selected].Path {
-			if branch, ok := m.selectedBranch(); ok && branch.Name == msg.BranchName {
+			if row, ok := m.selectedRow(); ok && row.Branch.Name == msg.BranchName {
 				m.overlayDiff = msg.Diff
+			}
+		}
+	case WorktreeRemovedMsg:
+		if m.selected < len(m.repos) && msg.RepoPath == m.repos[m.selected].Path {
+			return m, m.fetchBranches()
+		}
+	case BranchDeletedMsg:
+		if m.selected < len(m.repos) && msg.RepoPath == m.repos[m.selected].Path {
+			return m, m.fetchBranches()
+		}
+	case DeleteFailedMsg:
+		if m.selected < len(m.repos) && msg.RepoPath == m.repos[m.selected].Path {
+			m.confirmPrompt = fmt.Sprintf("Force delete %s? (y/n)", msg.Target)
+			m.confirmForce = true
+			m.overlay = OverlayConfirm
+			m.confirmAction = func() tea.Cmd {
+				return func() tea.Msg {
+					_ = msg.ForceAction()
+					if msg.IsWorktree {
+						return WorktreeRemovedMsg{RepoPath: msg.RepoPath}
+					}
+					return BranchDeletedMsg{RepoPath: msg.RepoPath}
+				}
 			}
 		}
 	case tea.WindowSizeMsg:
@@ -123,7 +175,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
-	// Overlay is open — only allow overlay controls
+	// Confirmation dialog — only allow confirm/cancel
+	if m.overlay == OverlayConfirm {
+		switch key {
+		case "y", "enter":
+			action := m.confirmAction
+			m.overlay = OverlayNone
+			m.confirmPrompt = ""
+			m.confirmAction = nil
+			m.confirmForce = false
+			return m, action()
+		case "n", "q", "esc":
+			m.overlay = OverlayNone
+			m.confirmPrompt = ""
+			m.confirmAction = nil
+			m.confirmForce = false
+		}
+		return m, nil
+	}
+
+	// Diff overlay — only allow scroll/close
 	if m.overlay != OverlayNone {
 		switch key {
 		case "q", "esc":
@@ -146,8 +217,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "up", "k":
 		if m.mode == ModeBranches {
-			if count := diffableBranchCount(m.branches); count > 0 && m.branchSelected > 0 {
+			if len(m.rows) > 0 && m.branchSelected > 0 {
 				m.branchSelected--
+				m = m.ensureBranchVisible()
 				return m, nil
 			}
 		}
@@ -156,8 +228,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "down", "j":
 		if m.mode == ModeBranches {
-			if count := diffableBranchCount(m.branches); count > 0 && m.branchSelected < count-1 {
+			if len(m.rows) > 0 && m.branchSelected < len(m.rows)-1 {
 				m.branchSelected++
+				m = m.ensureBranchVisible()
 				return m, nil
 			}
 		}
@@ -207,6 +280,49 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.overlay = OverlayStashDiff
 			return m, m.fetchStashDiff()
 		}
+	case "d":
+		if m.mode == ModeBranches && len(m.repos) > 0 {
+			row, ok := m.selectedRow()
+			if !ok {
+				break
+			}
+			repoPath := m.repos[m.selected].Path
+			if row.WorktreePath != "" {
+				worktreePath := row.WorktreePath
+				m.confirmPrompt = fmt.Sprintf("Remove worktree %s? (y/n)", worktreePath)
+				m.confirmAction = func() tea.Cmd {
+					return func() tea.Msg {
+						if err := actions.RemoveWorktree(repoPath, worktreePath); err != nil {
+							return DeleteFailedMsg{
+								RepoPath:    repoPath,
+								Target:      worktreePath,
+								ForceAction: func() error { return actions.ForceRemoveWorktree(repoPath, worktreePath) },
+								IsWorktree:  true,
+							}
+						}
+						return WorktreeRemovedMsg{RepoPath: repoPath}
+					}
+				}
+			} else {
+				branchName := row.Branch.Name
+				m.confirmPrompt = fmt.Sprintf("Delete branch %s? (y/n)", branchName)
+				m.confirmAction = func() tea.Cmd {
+					return func() tea.Msg {
+						if err := actions.DeleteBranch(repoPath, branchName); err != nil {
+							return DeleteFailedMsg{
+								RepoPath:    repoPath,
+								Target:      branchName,
+								ForceAction: func() error { return actions.ForceDeleteBranch(repoPath, branchName) },
+							}
+						}
+						return BranchDeletedMsg{RepoPath: repoPath}
+					}
+				}
+			}
+			m.overlay = OverlayConfirm
+		}
+	case "r":
+		return m, m.fetchForMode()
 	case "q", "ctrl+c", "esc":
 		return m, tea.Quit
 	}
@@ -220,13 +336,16 @@ func (m Model) View() string {
 		Width:          m.width,
 		Height:         m.height,
 		Mode:           int(m.mode),
-		Branches:       m.branches,
+		Branches:       m.rows,
 		Stashes:        m.stashes,
 		BranchSelected: m.branchSelected,
 		StashSelected:  m.stashSelected,
 		Overlay:        int(m.overlay),
 		OverlayDiff:    m.overlayDiff,
 		OverlayScroll:  m.overlayScroll,
+		ConfirmPrompt:  m.confirmPrompt,
+		ConfirmForce:   m.confirmForce,
+		BranchScroll:   m.branchScroll,
 	})
 }
 
@@ -266,17 +385,17 @@ func (m Model) fetchBranchDiff() tea.Cmd {
 	if len(m.repos) == 0 {
 		return nil
 	}
-	branch, ok := m.selectedBranch()
-	if !ok || !branch.Dirty || !branch.IsWorktree {
+	row, ok := m.selectedRow()
+	if !ok || !row.Branch.Dirty || !row.Branch.IsWorktree {
 		return nil
 	}
 
 	repoPath := m.repos[m.selected].Path
-	worktreePath := repoPath
-	if len(branch.WorktreePaths) > 0 {
-		worktreePath = branch.WorktreePaths[0]
+	worktreePath := row.WorktreePath
+	if worktreePath == "" {
+		worktreePath = repoPath
 	}
-	branchName := branch.Name
+	branchName := row.Branch.Name
 
 	return func() tea.Msg {
 		diff, _ := gitquery.BranchDiff(worktreePath)
@@ -288,36 +407,46 @@ func (m Model) fetchBranchDiff() tea.Cmd {
 	}
 }
 
-func (m Model) selectedBranch() (gitquery.Branch, bool) {
-	if m.branchSelected < 0 {
-		return gitquery.Branch{}, false
+func (m Model) selectedRow() (gitquery.BranchRow, bool) {
+	if m.branchSelected < 0 || m.branchSelected >= len(m.rows) {
+		return gitquery.BranchRow{}, false
 	}
-	index := 0
-	for _, branch := range m.branches {
-		if !branch.Dirty || !branch.IsWorktree {
-			continue
-		}
-		if index == m.branchSelected {
-			return branch, true
-		}
-		index++
+	return m.rows[m.branchSelected], true
+}
+
+func (m Model) ensureBranchVisible() Model {
+	contentHeight := m.height - 1
+	if contentHeight <= 0 {
+		contentHeight = 20 // fallback when height not yet set
 	}
-	return gitquery.Branch{}, false
+	// Calculate the content line index for the selected row
+	line := 0
+	for i, row := range m.rows {
+		if i == m.branchSelected {
+			break
+		}
+		line++
+		if !row.IsExpansion {
+			n := len(row.Branch.Unpushed)
+			if n > 5 {
+				line += 6 // 5 + overflow line
+			} else {
+				line += n
+			}
+		}
+	}
+	if m.branchScroll > line {
+		m.branchScroll = line
+	}
+	if line >= m.branchScroll+contentHeight {
+		m.branchScroll = line - contentHeight + 1
+	}
+	return m
 }
 
 func (m Model) isSelectedBranchDirtyWorktree() bool {
-	branch, ok := m.selectedBranch()
-	return ok && branch.Dirty && branch.IsWorktree
-}
-
-func diffableBranchCount(branches []gitquery.Branch) int {
-	count := 0
-	for _, branch := range branches {
-		if branch.Dirty && branch.IsWorktree {
-			count++
-		}
-	}
-	return count
+	row, ok := m.selectedRow()
+	return ok && row.Branch.Dirty && row.Branch.IsWorktree
 }
 
 func (m Model) fetchStashDiff() tea.Cmd {

@@ -72,10 +72,10 @@ func TestRepoList_ScrollsWhenSelectionExceedsHeight(t *testing.T) {
 }
 
 func TestBranchPane_CleanBranchShowsGreenCheck(t *testing.T) {
-	branches := []gitquery.Branch{
-		{Name: "main", HasUpstream: true, Ahead: 0, Behind: 0, Dirty: false},
+	rows := []gitquery.BranchRow{
+		{Branch: gitquery.Branch{Name: "main", HasUpstream: true, Ahead: 0, Behind: 0, Dirty: false}},
 	}
-	lines := renderBranchPane(branches, 50, 10)
+	lines := renderBranchPane(rows, 50, 10)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "main") {
 		t.Error("should contain branch name 'main'")
@@ -89,10 +89,10 @@ func TestBranchPane_CleanBranchShowsGreenCheck(t *testing.T) {
 }
 
 func TestBranchPane_AheadBehindShowsYellowDotWithCounts(t *testing.T) {
-	branches := []gitquery.Branch{
-		{Name: "feature/auth", HasUpstream: true, Ahead: 3, Behind: 1, Dirty: false},
+	rows := []gitquery.BranchRow{
+		{Branch: gitquery.Branch{Name: "feature/auth", HasUpstream: true, Ahead: 3, Behind: 1, Dirty: false}},
 	}
-	lines := renderBranchPane(branches, 60, 10)
+	lines := renderBranchPane(rows, 60, 10)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "●") {
 		t.Error("ahead/behind branch should show ● indicator")
@@ -106,11 +106,11 @@ func TestBranchPane_AheadBehindShowsYellowDotWithCounts(t *testing.T) {
 }
 
 func TestBranchPane_DirtyShowsRedDotWithFileStats(t *testing.T) {
-	branches := []gitquery.Branch{
-		{Name: "feature/wip", HasUpstream: true, Dirty: true, IsWorktree: true,
-			FilesChanged: 3, LinesAdded: 10, LinesDeleted: 5},
+	rows := []gitquery.BranchRow{
+		{Branch: gitquery.Branch{Name: "feature/wip", HasUpstream: true, Dirty: true, IsWorktree: true,
+			FilesChanged: 3, LinesAdded: 10, LinesDeleted: 5}},
 	}
-	lines := renderBranchPane(branches, 60, 10)
+	lines := renderBranchPane(rows, 60, 10)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "●") {
 		t.Error("dirty branch should show ● indicator")
@@ -127,10 +127,10 @@ func TestBranchPane_DirtyShowsRedDotWithFileStats(t *testing.T) {
 }
 
 func TestBranchPane_NoUpstreamShowsPurpleDot(t *testing.T) {
-	branches := []gitquery.Branch{
-		{Name: "local-only", HasUpstream: false},
+	rows := []gitquery.BranchRow{
+		{Branch: gitquery.Branch{Name: "local-only", HasUpstream: false}},
 	}
-	lines := renderBranchPane(branches, 50, 10)
+	lines := renderBranchPane(rows, 50, 10)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "●") {
 		t.Error("no-upstream branch should show ● indicator")
@@ -141,10 +141,10 @@ func TestBranchPane_NoUpstreamShowsPurpleDot(t *testing.T) {
 }
 
 func TestBranchPane_UpstreamGoneShowsPurpleDot(t *testing.T) {
-	branches := []gitquery.Branch{
-		{Name: "stale", HasUpstream: true, UpstreamGone: true},
+	rows := []gitquery.BranchRow{
+		{Branch: gitquery.Branch{Name: "stale", HasUpstream: true, UpstreamGone: true}},
 	}
-	lines := renderBranchPane(branches, 50, 10)
+	lines := renderBranchPane(rows, 50, 10)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "●") {
 		t.Error("upstream-gone branch should show ● indicator")
@@ -155,11 +155,11 @@ func TestBranchPane_UpstreamGoneShowsPurpleDot(t *testing.T) {
 }
 
 func TestBranchPane_StacksAheadAndDirtyIndicators(t *testing.T) {
-	branches := []gitquery.Branch{
-		{Name: "feat", HasUpstream: true, Ahead: 2, Behind: 0, Dirty: true, IsWorktree: true,
-			FilesChanged: 1, LinesAdded: 5, LinesDeleted: 2},
+	rows := []gitquery.BranchRow{
+		{Branch: gitquery.Branch{Name: "feat", HasUpstream: true, Ahead: 2, Behind: 0, Dirty: true, IsWorktree: true,
+			FilesChanged: 1, LinesAdded: 5, LinesDeleted: 2}},
 	}
-	lines := renderBranchPane(branches, 80, 10)
+	lines := renderBranchPane(rows, 80, 10)
 	joined := strings.Join(lines, "\n")
 	// Should have both +2/-0 (ahead) and 1 files (dirty)
 	if !strings.Contains(joined, "+2/-0") {
@@ -178,10 +178,10 @@ func TestBranchPane_StacksAheadAndDirtyIndicators(t *testing.T) {
 }
 
 func TestBranchPane_WorktreeAnnotation(t *testing.T) {
-	branches := []gitquery.Branch{
-		{Name: "feat", HasUpstream: true, IsWorktree: true, WorktreePaths: []string{"/dev/proj-feat"}},
+	rows := []gitquery.BranchRow{
+		{Branch: gitquery.Branch{Name: "feat", HasUpstream: true, IsWorktree: true}, WorktreePath: "/dev/proj-feat"},
 	}
-	lines := renderBranchPane(branches, 60, 10)
+	lines := renderBranchPane(rows, 60, 10)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "[/dev/proj-feat]") {
 		t.Error("worktree branch should show [<path>] annotation")
@@ -189,10 +189,12 @@ func TestBranchPane_WorktreeAnnotation(t *testing.T) {
 }
 
 func TestBranchPane_DuplicateWorktreeAnnotation(t *testing.T) {
-	branches := []gitquery.Branch{
-		{Name: "feat", HasUpstream: true, IsWorktree: true, WorktreePaths: []string{"/dev/proj-feat", "/tmp/proj-feat-copy"}},
+	b := gitquery.Branch{Name: "feat", HasUpstream: true, IsWorktree: true}
+	rows := []gitquery.BranchRow{
+		{Branch: b, WorktreePath: "/dev/proj-feat"},
+		{Branch: b, WorktreePath: "/tmp/proj-feat-copy", IsExpansion: true},
 	}
-	lines := renderBranchPane(branches, 80, 10)
+	lines := renderBranchPane(rows, 80, 10)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "/dev/proj-feat") || !strings.Contains(joined, "/tmp/proj-feat-copy") {
 		t.Error("duplicate worktree branch should show both paths")
@@ -203,10 +205,10 @@ func TestBranchPane_DuplicateWorktreeAnnotation(t *testing.T) {
 }
 
 func TestBranchPane_DetachedWorktreeRow(t *testing.T) {
-	branches := []gitquery.Branch{
-		{Name: "(detached)", IsWorktree: true, WorktreePaths: []string{"/tmp/wt-detached"}},
+	rows := []gitquery.BranchRow{
+		{Branch: gitquery.Branch{Name: "(detached)", IsWorktree: true}, WorktreePath: "/tmp/wt-detached"},
 	}
-	lines := renderBranchPane(branches, 80, 10)
+	lines := renderBranchPane(rows, 80, 10)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "(detached)") {
 		t.Error("detached worktree should render as a detached row")
@@ -217,58 +219,65 @@ func TestBranchPane_DetachedWorktreeRow(t *testing.T) {
 }
 
 func TestBranchPane_NonWorktreeNoAnnotation(t *testing.T) {
-	branches := []gitquery.Branch{
-		{Name: "feat", HasUpstream: true, IsWorktree: false},
+	rows := []gitquery.BranchRow{
+		{Branch: gitquery.Branch{Name: "feat", HasUpstream: true, IsWorktree: false}},
 	}
-	lines := renderBranchPane(branches, 60, 10)
+	lines := renderBranchPane(rows, 60, 10)
 	joined := strings.Join(lines, "\n")
 	if strings.Contains(joined, "[wt:") || strings.Contains(joined, "[duplicate:") {
 		t.Error("non-worktree branch should not show worktree annotation")
 	}
 }
 
-func TestRender_HighlightsSelectedDiffableBranch(t *testing.T) {
+func TestRender_HighlightsSelectedBranch(t *testing.T) {
+	// BranchSelected: 0 highlights first branch (clean), not the dirty one
 	view := Render(RenderParams{
 		Repos:    []scanner.Repo{{Path: "/a", DisplayName: "alpha"}},
 		Selected: 0,
 		Width:    80,
 		Height:   10,
 		Mode:     1,
-		Branches: []gitquery.Branch{
-			{Name: "clean"},
-			{Name: "dirty", IsWorktree: true, Dirty: true, WorktreePaths: []string{"/a"}},
+		Branches: []gitquery.BranchRow{
+			{Branch: gitquery.Branch{Name: "clean"}},
+			{Branch: gitquery.Branch{Name: "dirty", IsWorktree: true, Dirty: true}, WorktreePath: "/a"},
 		},
 		BranchSelected: 0,
 	})
-	if !strings.Contains(view, "> dirty") {
-		t.Error("selected diffable branch should render with a visible cursor")
+	if !strings.Contains(view, "> clean") {
+		t.Error("first branch should be highlighted when BranchSelected=0")
 	}
-	if strings.Contains(view, "> clean") {
-		t.Error("non-diffable branch should not be highlighted")
+	if strings.Contains(view, "> dirty") {
+		t.Error("dirty branch should not be highlighted when BranchSelected=0")
 	}
 }
 
-func TestRender_HidesBranchCursorWhenNoDiffableBranches(t *testing.T) {
+func TestRender_HighlightsSecondBranch(t *testing.T) {
 	view := Render(RenderParams{
-		Repos:          []scanner.Repo{{Path: "/a", DisplayName: "alpha"}},
-		Selected:       0,
-		Width:          80,
-		Height:         10,
-		Mode:           1,
-		Branches:       []gitquery.Branch{{Name: "clean-1"}, {Name: "clean-2"}},
-		BranchSelected: 0,
+		Repos:    []scanner.Repo{{Path: "/a", DisplayName: "alpha"}},
+		Selected: 0,
+		Width:    80,
+		Height:   10,
+		Mode:     1,
+		Branches: []gitquery.BranchRow{
+			{Branch: gitquery.Branch{Name: "clean"}},
+			{Branch: gitquery.Branch{Name: "dirty", IsWorktree: true, Dirty: true}, WorktreePath: "/a"},
+		},
+		BranchSelected: 1,
 	})
-	if strings.Contains(view, "> clean-1") || strings.Contains(view, "> clean-2") {
-		t.Error("branch cursor should be hidden when there are no diffable branches")
+	if !strings.Contains(view, "> dirty") {
+		t.Error("dirty branch should be highlighted when BranchSelected=1")
+	}
+	if strings.Contains(view, "> clean") {
+		t.Error("clean branch should not be highlighted when BranchSelected=1")
 	}
 }
 
 func TestBranchPane_UnpushedCommitsShown(t *testing.T) {
-	branches := []gitquery.Branch{
-		{Name: "feat", HasUpstream: true, Ahead: 2,
-			Unpushed: []string{"abc1234 Fix bug", "def5678 Add feature"}},
+	rows := []gitquery.BranchRow{
+		{Branch: gitquery.Branch{Name: "feat", HasUpstream: true, Ahead: 2,
+			Unpushed: []string{"abc1234 Fix bug", "def5678 Add feature"}}},
 	}
-	lines := renderBranchPane(branches, 60, 10)
+	lines := renderBranchPane(rows, 60, 10)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "Fix bug") {
 		t.Error("should show unpushed commit message")
@@ -283,10 +292,10 @@ func TestBranchPane_UnpushedCapsAt5WithOverflow(t *testing.T) {
 	for i := range msgs {
 		msgs[i] = fmt.Sprintf("abc%d commit message %d", i, i)
 	}
-	branches := []gitquery.Branch{
-		{Name: "feat", HasUpstream: true, Ahead: 8, Unpushed: msgs},
+	rows := []gitquery.BranchRow{
+		{Branch: gitquery.Branch{Name: "feat", HasUpstream: true, Ahead: 8, Unpushed: msgs}},
 	}
-	lines := renderBranchPane(branches, 60, 20)
+	lines := renderBranchPane(rows, 60, 20)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "and 3 more") {
 		t.Error("should show 'and 3 more' overflow for 8 commits with cap of 5")
@@ -304,6 +313,22 @@ func TestBranchPane_UnpushedCapsAt5WithOverflow(t *testing.T) {
 	}
 }
 
+func TestBranchPane_ScrollsToSelectedBranch(t *testing.T) {
+	rows := make([]gitquery.BranchRow, 10)
+	for i := range rows {
+		rows[i] = gitquery.BranchRow{Branch: gitquery.Branch{Name: fmt.Sprintf("branch-%d", i)}}
+	}
+	// BranchScroll=8 with height=3 means we see branches 8 and 9
+	lines := renderBranchPaneSelected(rows, 9, 8, 60, 3)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "branch-9") {
+		t.Error("should show branch-9 when scrolled to see it")
+	}
+	if strings.Contains(joined, "branch-0") {
+		t.Error("branch-0 should be scrolled out of view")
+	}
+}
+
 func TestRender_CombinesPanesWithDivider(t *testing.T) {
 	view := Render(RenderParams{
 		Repos:    []scanner.Repo{{Path: "/a", DisplayName: "alpha"}},
@@ -317,5 +342,76 @@ func TestRender_CombinesPanesWithDivider(t *testing.T) {
 	}
 	if !strings.Contains(view, "alpha") {
 		t.Error("view should contain repo name")
+	}
+}
+
+func TestRender_ConfirmDialogShowsPrompt(t *testing.T) {
+	view := Render(RenderParams{
+		Repos:         []scanner.Repo{{Path: "/dev/alpha", DisplayName: "alpha"}},
+		Width:         80,
+		Height:        24,
+		Mode:          1,
+		Overlay:       int(3), // OverlayConfirm
+		ConfirmPrompt: "Remove worktree /dev/alpha/feat? (y/n)",
+	})
+	if !strings.Contains(view, "Remove worktree /dev/alpha/feat") {
+		t.Error("confirm dialog should show prompt text")
+	}
+	if !strings.Contains(view, "y/n") {
+		t.Error("confirm dialog should show y/n hint")
+	}
+}
+
+func TestRender_ForceConfirmDialogShowsPrompt(t *testing.T) {
+	view := Render(RenderParams{
+		Repos:         []scanner.Repo{{Path: "/dev/alpha", DisplayName: "alpha"}},
+		Width:         80,
+		Height:        24,
+		Mode:          1,
+		Overlay:       int(3), // OverlayConfirm
+		ConfirmPrompt: "Force delete /dev/alpha/feat? (y/n)",
+		ConfirmForce:  true,
+	})
+	if !strings.Contains(view, "Force delete /dev/alpha/feat") {
+		t.Error("force confirm dialog should show prompt text")
+	}
+}
+
+func TestStatusBar_ShowsRefreshHint(t *testing.T) {
+	bar := RenderStatusBar(120, 1, 0)
+	if !strings.Contains(bar, "r: refresh") {
+		t.Errorf("status bar should contain 'r: refresh', got: %q", bar)
+	}
+	bar = RenderStatusBar(120, 2, 0)
+	if !strings.Contains(bar, "r: refresh") {
+		t.Errorf("mode 2 status bar should contain 'r: refresh', got: %q", bar)
+	}
+}
+
+func TestStatusBar_ShowsDeleteHintInMode1(t *testing.T) {
+	bar := RenderStatusBar(120, 1, 0)
+	if !strings.Contains(bar, "d: delete") {
+		t.Errorf("mode 1 status bar should always contain 'd: delete', got: %q", bar)
+	}
+}
+
+func TestBranchPane_MultiWorktreeExpandsRows(t *testing.T) {
+	b := gitquery.Branch{Name: "feat", HasUpstream: true, Unpushed: []string{"abc1234 Fix thing"}}
+	rows := []gitquery.BranchRow{
+		{Branch: b, WorktreePath: "/dev/feat-A"},
+		{Branch: b, WorktreePath: "/dev/feat-B", IsExpansion: true},
+	}
+	lines := renderBranchPane(rows, 80, 10)
+	joined := strings.Join(lines, "\n")
+	// Both paths should appear
+	if !strings.Contains(joined, "/dev/feat-A") {
+		t.Error("should show first worktree path /dev/feat-A")
+	}
+	if !strings.Contains(joined, "/dev/feat-B") {
+		t.Error("should show second worktree path /dev/feat-B")
+	}
+	// Unpushed commit should appear once (on first row), not on expansion row
+	if strings.Count(joined, "Fix thing") != 1 {
+		t.Errorf("unpushed commit should appear exactly once, got %d", strings.Count(joined, "Fix thing"))
 	}
 }

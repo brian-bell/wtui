@@ -1,6 +1,7 @@
 package model_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -216,23 +217,62 @@ func TestModel_ModeSwitchPreservesSelection(t *testing.T) {
 	}
 }
 
-func TestModel_BranchCursorSkipsNonDiffableBranches(t *testing.T) {
+func TestModel_UpDownNavigatesAllBranches(t *testing.T) {
 	branches := []gitquery.Branch{
 		{Name: "clean-1"},
 		{Name: "dirty-1", IsWorktree: true, Dirty: true, WorktreePaths: []string{"/dev/alpha"}},
 		{Name: "clean-2"},
 		{Name: "dirty-2", IsWorktree: true, Dirty: true, WorktreePaths: []string{"/dev/alpha"}},
 	}
-
 	m := model.New(testRepos())
-	m, _ = update(m, model.BranchResultMsg{
-		RepoPath: "/dev/alpha",
-		Branches: branches,
-	})
+	m, _ = update(m, model.BranchResultMsg{RepoPath: "/dev/alpha", Branches: branches})
 
-	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.BranchSelected() != 0 {
+		t.Errorf("expected cursor at 0, got %d", m.BranchSelected())
+	}
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.BranchSelected() != 1 {
+		t.Errorf("expected cursor at 1, got %d", m.BranchSelected())
+	}
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.BranchSelected() != 2 {
+		t.Errorf("expected cursor at 2, got %d", m.BranchSelected())
+	}
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.BranchSelected() != 3 {
+		t.Errorf("expected cursor at 3, got %d", m.BranchSelected())
+	}
+	// Clamp at last
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.BranchSelected() != 3 {
+		t.Errorf("expected cursor clamped at 3, got %d", m.BranchSelected())
+	}
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyUp})
+	if m.BranchSelected() != 2 {
+		t.Errorf("expected cursor at 2 on up, got %d", m.BranchSelected())
+	}
+}
+
+func TestModel_EnterStillRequiresDirtyWorktree(t *testing.T) {
+	branches := []gitquery.Branch{
+		{Name: "clean-1"},
+		{Name: "dirty-1", IsWorktree: true, Dirty: true, WorktreePaths: []string{"/dev/alpha"}},
+		{Name: "clean-2"},
+	}
+	m := model.New(testRepos())
+	m, _ = update(m, model.BranchResultMsg{RepoPath: "/dev/alpha", Branches: branches})
+
+	// Cursor at clean-1 (index 0): enter is no-op
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("enter on clean branch should be no-op")
+	}
+
+	// Navigate to dirty-1 (index 1): enter opens diff
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	_, cmd = update(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
-		t.Fatal("expected diff cmd for first dirty branch, got nil")
+		t.Fatal("enter on dirty+worktree branch should open diff")
 	}
 	msg := cmd()
 	diffMsg, ok := msg.(model.BranchDiffResultMsg)
@@ -240,40 +280,14 @@ func TestModel_BranchCursorSkipsNonDiffableBranches(t *testing.T) {
 		t.Fatalf("expected BranchDiffResultMsg, got %T", msg)
 	}
 	if diffMsg.BranchName != "dirty-1" {
-		t.Fatalf("expected first diffable branch dirty-1, got %q", diffMsg.BranchName)
+		t.Errorf("expected dirty-1, got %q", diffMsg.BranchName)
 	}
 
-	m2 := model.New(testRepos())
-	m2, _ = update(m2, model.BranchResultMsg{RepoPath: "/dev/alpha", Branches: branches})
-	m2, _ = update(m2, tea.KeyMsg{Type: tea.KeyDown})
-	m2, cmd = update(m2, tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd == nil {
-		t.Fatal("expected diff cmd for second dirty branch, got nil")
-	}
-	msg = cmd()
-	diffMsg, ok = msg.(model.BranchDiffResultMsg)
-	if !ok {
-		t.Fatalf("expected BranchDiffResultMsg, got %T", msg)
-	}
-	if diffMsg.BranchName != "dirty-2" {
-		t.Fatalf("expected second diffable branch dirty-2, got %q", diffMsg.BranchName)
-	}
-
-	m3 := model.New(testRepos())
-	m3, _ = update(m3, model.BranchResultMsg{RepoPath: "/dev/alpha", Branches: branches})
-	m3, _ = update(m3, tea.KeyMsg{Type: tea.KeyDown})
-	m3, _ = update(m3, tea.KeyMsg{Type: tea.KeyDown})
-	m3, cmd = update(m3, tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd == nil {
-		t.Fatal("expected diff cmd after clamping at last dirty branch, got nil")
-	}
-	msg = cmd()
-	diffMsg, ok = msg.(model.BranchDiffResultMsg)
-	if !ok {
-		t.Fatalf("expected BranchDiffResultMsg, got %T", msg)
-	}
-	if diffMsg.BranchName != "dirty-2" {
-		t.Fatalf("expected cursor to clamp at dirty-2, got %q", diffMsg.BranchName)
+	// Navigate to clean-2 (index 2): enter is no-op
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	_, cmd = update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("enter on clean-2 should be no-op")
 	}
 }
 
@@ -357,11 +371,11 @@ func TestModel_BranchResultUpdatesState(t *testing.T) {
 		{Name: "feature", HasUpstream: true, Ahead: 1},
 	}
 	m, _ = update(m, model.BranchResultMsg{RepoPath: "/dev/alpha", Branches: branches})
-	if len(m.Branches()) != 2 {
-		t.Fatalf("expected 2 branches, got %d", len(m.Branches()))
+	if len(m.Rows()) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(m.Rows()))
 	}
-	if m.Branches()[0].Name != "main" {
-		t.Errorf("expected first branch 'main', got %q", m.Branches()[0].Name)
+	if m.Rows()[0].Branch.Name != "main" {
+		t.Errorf("expected first branch 'main', got %q", m.Rows()[0].Branch.Name)
 	}
 }
 
@@ -370,8 +384,8 @@ func TestModel_StaleBranchResultDiscarded(t *testing.T) {
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyTab}) // select bravo
 	branches := []gitquery.Branch{{Name: "main"}}
 	m, _ = update(m, model.BranchResultMsg{RepoPath: "/dev/alpha", Branches: branches})
-	if len(m.Branches()) != 0 {
-		t.Errorf("expected stale result discarded, got %d branches", len(m.Branches()))
+	if len(m.Rows()) != 0 {
+		t.Errorf("expected stale result discarded, got %d rows", len(m.Rows()))
 	}
 }
 
@@ -723,6 +737,411 @@ func TestModel_ViewOverlayShowsDiff(t *testing.T) {
 	}
 	if !strings.Contains(view, "esc") {
 		t.Error("overlay should show esc hint")
+	}
+}
+
+// --- Confirmation dialog + refresh tests ---
+
+func worktreeBranch() gitquery.Branch {
+	return gitquery.Branch{
+		Name:          "feat",
+		IsWorktree:    true,
+		Dirty:         true,
+		WorktreePaths: []string{"/dev/alpha/feat"},
+	}
+}
+
+func modelWithWorktreeBranch() model.Model {
+	m := model.New(testRepos())
+	m, _ = update(m, model.BranchResultMsg{
+		RepoPath: "/dev/alpha",
+		Branches: []gitquery.Branch{worktreeBranch()},
+	})
+	return m
+}
+
+func TestModel_DKeyOpensConfirmOverlay(t *testing.T) {
+	m := modelWithWorktreeBranch()
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if m.Overlay() != model.OverlayConfirm {
+		t.Errorf("expected OverlayConfirm, got %d", m.Overlay())
+	}
+	if !strings.Contains(m.ConfirmPrompt(), "/dev/alpha/feat") {
+		t.Errorf("expected confirm prompt to contain worktree path, got %q", m.ConfirmPrompt())
+	}
+}
+
+func TestModel_DKeyOnNonWorktreeBranchOpensDeleteConfirm(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, model.BranchResultMsg{
+		RepoPath: "/dev/alpha",
+		Branches: []gitquery.Branch{{Name: "main"}},
+	})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if m.Overlay() != model.OverlayConfirm {
+		t.Errorf("expected OverlayConfirm for non-worktree branch, got %d", m.Overlay())
+	}
+	if !strings.Contains(m.ConfirmPrompt(), "main") {
+		t.Errorf("expected confirm prompt to contain branch name, got %q", m.ConfirmPrompt())
+	}
+	if !strings.Contains(m.ConfirmPrompt(), "Delete branch") {
+		t.Errorf("expected 'Delete branch' in prompt, got %q", m.ConfirmPrompt())
+	}
+}
+
+func TestModel_DKeyNoOpWithNoBranches(t *testing.T) {
+	m := model.New(testRepos())
+	// No branches loaded
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if m.Overlay() != model.OverlayNone {
+		t.Errorf("expected OverlayNone when no branches, got %d", m.Overlay())
+	}
+}
+
+func TestModel_ConfirmCancelEsc(t *testing.T) {
+	m := modelWithWorktreeBranch()
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyEscape})
+	if m.Overlay() != model.OverlayNone {
+		t.Errorf("expected overlay closed on esc, got %d", m.Overlay())
+	}
+	if cmd != nil {
+		msg := cmd()
+		if _, ok := msg.(tea.QuitMsg); ok {
+			t.Error("esc in confirm dialog should not quit")
+		}
+	}
+}
+
+func TestModel_ConfirmCancelQ(t *testing.T) {
+	m := modelWithWorktreeBranch()
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	if m.Overlay() != model.OverlayNone {
+		t.Errorf("expected overlay closed on q, got %d", m.Overlay())
+	}
+	if cmd != nil {
+		msg := cmd()
+		if _, ok := msg.(tea.QuitMsg); ok {
+			t.Error("q in confirm dialog should not quit")
+		}
+	}
+}
+
+func TestModel_ConfirmCancelN(t *testing.T) {
+	m := modelWithWorktreeBranch()
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if m.Overlay() != model.OverlayNone {
+		t.Errorf("expected overlay closed on n, got %d", m.Overlay())
+	}
+}
+
+func TestModel_ConfirmYClosesOverlayAndReturnsCmd(t *testing.T) {
+	m := modelWithWorktreeBranch()
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if m.Overlay() != model.OverlayNone {
+		t.Errorf("expected overlay closed after confirm, got %d", m.Overlay())
+	}
+	if cmd == nil {
+		t.Fatal("expected action cmd after confirm, got nil")
+	}
+}
+
+func TestModel_ConfirmEnterExecutesAction(t *testing.T) {
+	m := modelWithWorktreeBranch()
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.Overlay() != model.OverlayNone {
+		t.Errorf("expected overlay closed after enter, got %d", m.Overlay())
+	}
+	if cmd == nil {
+		t.Fatal("expected action cmd after enter confirm, got nil")
+	}
+}
+
+func TestModel_WorktreeRemoveFailReturnsDeleteFailedMsg(t *testing.T) {
+	// With a fake path, RemoveWorktree will fail → returns DeleteFailedMsg
+	m := modelWithWorktreeBranch()
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if cmd == nil {
+		t.Fatal("expected cmd, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.DeleteFailedMsg); !ok {
+		t.Fatalf("expected DeleteFailedMsg on fake-path failure, got %T", msg)
+	}
+}
+
+func TestModel_BranchDeleteFailReturnsDeleteFailedMsg(t *testing.T) {
+	// With a fake repo path, DeleteBranch will fail → returns DeleteFailedMsg
+	m := model.New(testRepos())
+	m, _ = update(m, model.BranchResultMsg{
+		RepoPath: "/dev/alpha",
+		Branches: []gitquery.Branch{{Name: "feat"}},
+	})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if cmd == nil {
+		t.Fatal("expected cmd, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.DeleteFailedMsg); !ok {
+		t.Fatalf("expected DeleteFailedMsg on fake-path failure, got %T", msg)
+	}
+}
+
+func TestModel_DeleteFailedMsgOpensForceConfirm(t *testing.T) {
+	m := model.New(testRepos())
+	forceActionCalled := false
+	m, _ = update(m, model.DeleteFailedMsg{
+		RepoPath: "/dev/alpha",
+		Target:   "/dev/alpha/feat",
+		ForceAction: func() error {
+			forceActionCalled = true
+			return nil
+		},
+		IsWorktree: true,
+	})
+	if m.Overlay() != model.OverlayConfirm {
+		t.Errorf("expected OverlayConfirm after DeleteFailedMsg, got %d", m.Overlay())
+	}
+	if !m.ConfirmForce() {
+		t.Error("expected ConfirmForce=true after DeleteFailedMsg")
+	}
+	if !strings.Contains(m.ConfirmPrompt(), "Force delete") {
+		t.Errorf("expected 'Force delete' in prompt, got %q", m.ConfirmPrompt())
+	}
+	if !strings.Contains(m.ConfirmPrompt(), "/dev/alpha/feat") {
+		t.Errorf("expected target in prompt, got %q", m.ConfirmPrompt())
+	}
+	_ = forceActionCalled
+}
+
+func TestModel_ForceConfirmCancelClearsForce(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, model.DeleteFailedMsg{
+		RepoPath:    "/dev/alpha",
+		Target:      "feat",
+		ForceAction: func() error { return nil },
+		IsWorktree:  false,
+	})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if m.Overlay() != model.OverlayNone {
+		t.Errorf("expected overlay closed after cancel, got %d", m.Overlay())
+	}
+	if m.ConfirmForce() {
+		t.Error("expected ConfirmForce cleared after cancel")
+	}
+}
+
+func TestModel_ForceConfirmYExecutesForceAction(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, model.DeleteFailedMsg{
+		RepoPath:    "/dev/alpha",
+		Target:      "feat",
+		ForceAction: func() error { return nil },
+		IsWorktree:  false,
+	})
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if m.Overlay() != model.OverlayNone {
+		t.Errorf("expected overlay closed after force confirm, got %d", m.Overlay())
+	}
+	if m.ConfirmForce() {
+		t.Error("expected ConfirmForce cleared after confirm")
+	}
+	if cmd == nil {
+		t.Fatal("expected cmd from force action, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.BranchDeletedMsg); !ok {
+		t.Fatalf("expected BranchDeletedMsg from force action (IsWorktree=false), got %T", msg)
+	}
+}
+
+func TestModel_ForceConfirmWorktreeYReturnsWorktreeRemovedMsg(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, model.DeleteFailedMsg{
+		RepoPath:    "/dev/alpha",
+		Target:      "/dev/alpha/feat",
+		ForceAction: func() error { return nil },
+		IsWorktree:  true,
+	})
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if cmd == nil {
+		t.Fatal("expected cmd, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.WorktreeRemovedMsg); !ok {
+		t.Fatalf("expected WorktreeRemovedMsg from force worktree action, got %T", msg)
+	}
+}
+
+func TestModel_BranchDeletedMsgTriggersFetch(t *testing.T) {
+	m := model.New(testRepos())
+	_, cmd := update(m, model.BranchDeletedMsg{RepoPath: "/dev/alpha"})
+	if cmd == nil {
+		t.Fatal("expected fetchBranches cmd after BranchDeletedMsg, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.BranchResultMsg); !ok {
+		t.Errorf("expected BranchResultMsg, got %T", msg)
+	}
+}
+
+func TestModel_StaleBranchDeletedMsgIgnored(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyTab}) // select bravo
+	_, cmd := update(m, model.BranchDeletedMsg{RepoPath: "/dev/alpha"})
+	if cmd != nil {
+		t.Error("expected stale BranchDeletedMsg to be ignored")
+	}
+}
+
+func TestModel_WorktreeRemovedMsgTriggersBranchFetch(t *testing.T) {
+	m := model.New(testRepos())
+	_, cmd := update(m, model.WorktreeRemovedMsg{RepoPath: "/dev/alpha"})
+	if cmd == nil {
+		t.Fatal("expected fetchBranches cmd after WorktreeRemovedMsg, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.BranchResultMsg); !ok {
+		t.Errorf("expected BranchResultMsg, got %T", msg)
+	}
+}
+
+func TestModel_StaleWorktreeRemovedMsgIgnored(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyTab}) // select bravo
+	_, cmd := update(m, model.WorktreeRemovedMsg{RepoPath: "/dev/alpha"})
+	if cmd != nil {
+		t.Error("expected stale WorktreeRemovedMsg to be ignored (no fetch cmd)")
+	}
+}
+
+func TestModel_RKeyRefreshesBranchesInMode1(t *testing.T) {
+	m := model.New(testRepos())
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	if cmd == nil {
+		t.Fatal("expected fetch cmd on r, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.BranchResultMsg); !ok {
+		t.Errorf("expected BranchResultMsg on r in mode 1, got %T", msg)
+	}
+}
+
+func TestModel_RKeyRefreshesStashesInMode2(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	if cmd == nil {
+		t.Fatal("expected fetch cmd on r in mode 2, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.StashResultMsg); !ok {
+		t.Errorf("expected StashResultMsg on r in mode 2, got %T", msg)
+	}
+}
+
+func TestModel_ConfirmDialogBlocksModeSwitch(t *testing.T) {
+	m := modelWithWorktreeBranch()
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	if m.Mode() != model.ModeBranches {
+		t.Errorf("confirm dialog should block mode switch, mode changed to %d", m.Mode())
+	}
+}
+
+func TestModel_BranchScrollFollowsCursor(t *testing.T) {
+	// Create 10 branches, terminal height only shows 3
+	branches := make([]gitquery.Branch, 10)
+	for i := range branches {
+		branches[i] = gitquery.Branch{Name: fmt.Sprintf("branch-%d", i)}
+	}
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: 4}) // 3 content lines + status bar
+	m, _ = update(m, model.BranchResultMsg{RepoPath: "/dev/alpha", Branches: branches})
+
+	// Cursor starts at 0, scroll at 0
+	if m.BranchScroll() != 0 {
+		t.Errorf("expected scroll 0 at start, got %d", m.BranchScroll())
+	}
+
+	// Move cursor down past the viewport
+	for i := 0; i < 9; i++ {
+		m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	if m.BranchSelected() != 9 {
+		t.Errorf("expected cursor at 9, got %d", m.BranchSelected())
+	}
+	// Scroll should have advanced to show cursor
+	if m.BranchScroll() == 0 {
+		t.Error("expected scroll to advance when cursor moves past viewport")
+	}
+	// Cursor must be within [scroll, scroll+contentHeight)
+	contentHeight := 3
+	if m.BranchSelected() < m.BranchScroll() || m.BranchSelected() >= m.BranchScroll()+contentHeight {
+		t.Errorf("cursor %d not in scroll viewport [%d, %d)", m.BranchSelected(), m.BranchScroll(), m.BranchScroll()+contentHeight)
+	}
+
+	// Move back up to 0
+	for i := 0; i < 9; i++ {
+		m, _ = update(m, tea.KeyMsg{Type: tea.KeyUp})
+	}
+	if m.BranchSelected() != 0 {
+		t.Errorf("expected cursor back at 0, got %d", m.BranchSelected())
+	}
+	if m.BranchScroll() != 0 {
+		t.Errorf("expected scroll back to 0, got %d", m.BranchScroll())
+	}
+}
+
+func TestModel_MultiWorktreeExpandsToRows(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	// Branch with 2 worktree paths — should expand to 2 navigable rows
+	branches := []gitquery.Branch{
+		{Name: "feat", IsWorktree: true, WorktreePaths: []string{"/dev/feat-A", "/dev/feat-B"}},
+	}
+	m, _ = update(m, model.BranchResultMsg{RepoPath: "/dev/alpha", Branches: branches})
+	if m.BranchSelected() != 0 {
+		t.Errorf("expected cursor at 0 initially, got %d", m.BranchSelected())
+	}
+	// Down should move to row 1 (expansion row)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.BranchSelected() != 1 {
+		t.Errorf("expected cursor at 1 after down, got %d", m.BranchSelected())
+	}
+	// Another down should clamp at 1 (only 2 rows total)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.BranchSelected() != 1 {
+		t.Errorf("expected cursor clamped at 1, got %d", m.BranchSelected())
+	}
+}
+
+func TestModel_DKeyOnExpansionRowTargetsSpecificPath(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	branches := []gitquery.Branch{
+		{Name: "feat", IsWorktree: true, WorktreePaths: []string{"/dev/feat-A", "/dev/feat-B"}},
+	}
+	m, _ = update(m, model.BranchResultMsg{RepoPath: "/dev/alpha", Branches: branches})
+	// Navigate to expansion row (index 1 = /dev/feat-B)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.BranchSelected() != 1 {
+		t.Fatalf("expected cursor at row 1, got %d", m.BranchSelected())
+	}
+	// Press d — should prompt for /dev/feat-B, not /dev/feat-A
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	prompt := m.ConfirmPrompt()
+	if !strings.Contains(prompt, "/dev/feat-B") {
+		t.Errorf("d on expansion row should target /dev/feat-B, got prompt: %q", prompt)
+	}
+	if strings.Contains(prompt, "/dev/feat-A") {
+		t.Errorf("d on expansion row should not mention /dev/feat-A, got prompt: %q", prompt)
 	}
 }
 

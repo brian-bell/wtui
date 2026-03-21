@@ -42,13 +42,16 @@ type RenderParams struct {
 	Width          int
 	Height         int
 	Mode           int
-	Branches       []gitquery.Branch
+	Branches       []gitquery.BranchRow
 	Stashes        []gitquery.Stash
 	BranchSelected int
 	StashSelected  int
 	Overlay        int
 	OverlayDiff    string
 	OverlayScroll  int
+	ConfirmPrompt  string
+	ConfirmForce   bool
+	BranchScroll   int
 }
 
 // Render produces the full terminal view string.
@@ -80,7 +83,7 @@ func Render(p RenderParams) string {
 	var rightLines []string
 	switch {
 	case p.Mode == 1 && len(p.Branches) > 0:
-		rightLines = renderBranchPaneSelected(p.Branches, p.BranchSelected, rightWidth, contentHeight)
+		rightLines = renderBranchPaneSelected(p.Branches, p.BranchSelected, p.BranchScroll, rightWidth, contentHeight)
 	case p.Mode == 2 && len(p.Stashes) > 0:
 		rightLines = renderStashPane(p.Stashes, p.StashSelected, rightWidth, contentHeight)
 	default:
@@ -123,12 +126,14 @@ func RenderStatusBar(width, mode, overlay int) string {
 	}
 
 	var hints string
-	if overlay != 0 {
+	if overlay == 3 {
+		hints = "  y: confirm  n/esc: cancel"
+	} else if overlay != 0 {
 		hints = "  ↑/↓ scroll  esc: close"
 	} else if mode == 2 {
-		hints = "  ↑/↓ select  enter: diff  tab: repo  ←/→: mode  q/esc: quit"
+		hints = "  ↑/↓ select  enter: diff  tab: repo  ←/→: mode  r: refresh  q/esc: quit"
 	} else {
-		hints = "  ↑/↓ enter  " + cleanStyle.Render("✔") + " clean  " + aheadBehindStyle.Render("●") + " ahead/behind  " + dirtyRedStyle.Render("●") + " dirty  " + noUpstreamStyle.Render("●") + " no upstream  tab: repo  ←/→: mode  q/esc: quit"
+		hints = "  ↑/↓ enter  " + cleanStyle.Render("✔") + " clean  " + aheadBehindStyle.Render("●") + " ahead/behind  " + dirtyRedStyle.Render("●") + " dirty  " + noUpstreamStyle.Render("●") + " no upstream  d: delete  r: refresh  tab: repo  ←/→: mode  q/esc: quit"
 	}
 
 	text := "  " + strings.Join(parts, " ") + hints
@@ -138,7 +143,6 @@ func RenderStatusBar(width, mode, overlay int) string {
 func renderRepoList(repos []scanner.Repo, selected, height int) []string {
 	lines := make([]string, height)
 
-	// Calculate viewport for scrolling
 	start := 0
 	if selected >= height {
 		start = selected - height + 1
@@ -163,15 +167,15 @@ func renderRepoList(repos []scanner.Repo, selected, height int) []string {
 	return lines
 }
 
-func renderBranchPane(branches []gitquery.Branch, width, height int) []string {
-	return renderBranchPaneSelected(branches, 0, width, height)
+func renderBranchPane(rows []gitquery.BranchRow, width, height int) []string {
+	return renderBranchPaneSelected(rows, 0, 0, width, height)
 }
 
-func renderBranchPaneSelected(branches []gitquery.Branch, selected, width, height int) []string {
+func renderBranchPaneSelected(rows []gitquery.BranchRow, selected, scroll, width, height int) []string {
 	var content []string
-	diffableIndex := 0
 
-	for _, b := range branches {
+	for i, row := range rows {
+		b := row.Branch
 		branch := branchStyle.Render(b.Name)
 
 		var indicators string
@@ -194,28 +198,27 @@ func renderBranchPaneSelected(branches []gitquery.Branch, selected, width, heigh
 		}
 
 		var annotation string
-		if b.IsWorktree {
-			annotation = formatWorktreeAnnotation(b.WorktreePaths)
+		if row.WorktreePath != "" {
+			annotation = " " + commitStyle.Render(fmt.Sprintf("[%s]", row.WorktreePath))
 		}
 
 		line := "  " + branch + indicators + annotation
-		if b.Dirty && b.IsWorktree && diffableIndex == selected {
+		if i == selected {
 			line = branchSelStyle.Render(" > " + strings.TrimPrefix(line, "  "))
 		}
 		content = append(content, line)
-		if b.Dirty && b.IsWorktree {
-			diffableIndex++
-		}
 
-		// Unpushed commits (max 5)
-		maxShow := 5
-		for j, msg := range b.Unpushed {
-			if j >= maxShow {
-				remaining := len(b.Unpushed) - maxShow
-				content = append(content, "    "+commitStyle.Render(fmt.Sprintf("... and %d more", remaining)))
-				break
+		// Unpushed commits (max 5) — skipped for expansion rows
+		if !row.IsExpansion {
+			maxShow := 5
+			for j, msg := range b.Unpushed {
+				if j >= maxShow {
+					remaining := len(b.Unpushed) - maxShow
+					content = append(content, "    "+commitStyle.Render(fmt.Sprintf("... and %d more", remaining)))
+					break
+				}
+				content = append(content, "    "+commitStyle.Render(msg))
 			}
-			content = append(content, "    "+commitStyle.Render(msg))
 		}
 	}
 
@@ -224,38 +227,21 @@ func renderBranchPaneSelected(branches []gitquery.Branch, selected, width, heigh
 		content[i] = truncateToWidth(line, width)
 	}
 
-	// Pad to fill height
+	// Apply scroll offset
+	if scroll > len(content) {
+		scroll = len(content)
+	}
+	visible := content[scroll:]
+
 	lines := make([]string, height)
-	for i := 0; i < height; i++ {
-		if i < len(content) {
-			lines[i] = content[i]
-		} else {
-			lines[i] = ""
-		}
-	}
+	copy(lines, visible)
 	return lines
-}
-
-func formatWorktreeAnnotation(paths []string) string {
-	if len(paths) == 0 {
-		return ""
-	}
-
-	shown := paths
-	suffix := ""
-	if len(paths) > 2 {
-		shown = paths[:2]
-		suffix = fmt.Sprintf(", +%d more", len(paths)-2)
-	}
-
-	return " " + commitStyle.Render(fmt.Sprintf("[%s%s]", strings.Join(shown, ", "), suffix))
 }
 
 func renderStashPane(stashes []gitquery.Stash, selected, width, height int) []string {
 	var content []string
 
 	for i, s := range stashes {
-		// Truncate date to just the date portion (first 10 chars)
 		date := s.Date
 		if len(date) > 10 {
 			date = date[:10]
@@ -266,28 +252,26 @@ func renderStashPane(stashes []gitquery.Stash, selected, width, height int) []st
 		line := fmt.Sprintf("  %s  %s", dateStr, msgStr)
 
 		if i == selected {
-			// Render selected line with highlight
 			line = stashSelStyle.Width(width).Render(fmt.Sprintf(" > %s  %s", date, s.Message))
 		}
 
 		content = append(content, truncateToWidth(line, width))
 	}
 
-	// Pad to fill height
 	lines := make([]string, height)
-	for i := 0; i < height; i++ {
-		if i < len(content) {
-			lines[i] = content[i]
-		} else {
-			lines[i] = ""
-		}
-	}
+	copy(lines, content)
 	return lines
 }
 
 func renderOverlay(p RenderParams) string {
 	statusBar := RenderStatusBar(p.Width, p.Mode, p.Overlay)
 	contentHeight := p.Height - 1
+
+	// Confirmation dialog overlay
+	if p.Overlay == 3 {
+		lines := renderConfirmDialog(p.ConfirmPrompt, p.ConfirmForce, p.Width, contentHeight)
+		return strings.Join(lines, "\n") + "\n" + statusBar
+	}
 
 	var diffLines []string
 	if p.OverlayDiff != "" {
@@ -303,28 +287,41 @@ func renderOverlay(p RenderParams) string {
 
 	lines := make([]string, contentHeight)
 	for i := 0; i < contentHeight; i++ {
-		if i < len(visible) {
-			line := visible[i]
-			// Colorize diff lines
-			switch {
-			case strings.HasPrefix(line, "+"):
-				lines[i] = diffAddStyle.Render(line)
-			case strings.HasPrefix(line, "-"):
-				lines[i] = diffDelStyle.Render(line)
-			case strings.HasPrefix(line, "@@"):
-				lines[i] = diffHdrStyle.Render(line)
-			case strings.HasPrefix(line, "diff "):
-				lines[i] = diffHdrStyle.Render(line)
-			default:
-				lines[i] = line
-			}
-			lines[i] = truncateToWidth(lines[i], p.Width)
-		} else {
-			lines[i] = ""
+		if i >= len(visible) {
+			break
 		}
+		line := visible[i]
+		switch {
+		case strings.HasPrefix(line, "+"):
+			lines[i] = diffAddStyle.Render(line)
+		case strings.HasPrefix(line, "-"):
+			lines[i] = diffDelStyle.Render(line)
+		case strings.HasPrefix(line, "@@"), strings.HasPrefix(line, "diff "):
+			lines[i] = diffHdrStyle.Render(line)
+		default:
+			lines[i] = line
+		}
+		lines[i] = truncateToWidth(lines[i], p.Width)
 	}
 
 	return strings.Join(lines, "\n") + "\n" + statusBar
+}
+
+func renderConfirmDialog(prompt string, force bool, width, height int) []string {
+	lines := make([]string, height)
+	mid := height / 2
+	if mid < len(lines) {
+		pad := (width - lipgloss.Width(prompt)) / 2
+		if pad < 0 {
+			pad = 0
+		}
+		style := activeModeStyle
+		if force {
+			style = dirtyRedStyle.Bold(true)
+		}
+		lines[mid] = strings.Repeat(" ", pad) + style.Render(prompt)
+	}
+	return lines
 }
 
 // truncateToWidth trims a styled string to fit within maxWidth visible columns.
@@ -342,21 +339,12 @@ func truncateToWidth(s string, maxWidth int) string {
 
 func renderPlaceholderPane(width, height int) []string {
 	lines := make([]string, height)
-
 	placeholder := placeholderStyle.Render("nothing here yet")
-
 	mid := height / 2
-	for i := 0; i < height; i++ {
-		if i == mid {
-			pad := (width - lipgloss.Width(placeholder)) / 2
-			if pad < 0 {
-				pad = 0
-			}
-			lines[i] = strings.Repeat(" ", pad) + placeholder
-		} else {
-			lines[i] = ""
-		}
+	pad := (width - lipgloss.Width(placeholder)) / 2
+	if pad < 0 {
+		pad = 0
 	}
-
+	lines[mid] = strings.Repeat(" ", pad) + placeholder
 	return lines
 }

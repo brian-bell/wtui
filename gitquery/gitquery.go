@@ -15,6 +15,46 @@ type Stash struct {
 	Message string
 }
 
+// Branch represents a local git branch with its status.
+type Branch struct {
+	Name          string
+	HasUpstream   bool
+	UpstreamGone  bool
+	Ahead         int
+	Behind        int
+	Unpushed      []string
+	IsWorktree    bool
+	WorktreePaths []string
+	Dirty         bool
+	FilesChanged  int
+	LinesAdded    int
+	LinesDeleted  int
+}
+
+// BranchRow is one display row in the branch pane.
+// A branch with N worktree paths expands into N rows.
+type BranchRow struct {
+	Branch       Branch
+	WorktreePath string // specific path for this row; empty for non-worktree branches
+	IsExpansion  bool   // true for 2nd+ rows of a multi-worktree branch
+}
+
+// FlattenBranches converts a branch list into display rows,
+// expanding multi-worktree branches into one row per path.
+func FlattenBranches(branches []Branch) []BranchRow {
+	var rows []BranchRow
+	for _, b := range branches {
+		if len(b.WorktreePaths) == 0 {
+			rows = append(rows, BranchRow{Branch: b})
+			continue
+		}
+		for i, p := range b.WorktreePaths {
+			rows = append(rows, BranchRow{Branch: b, WorktreePath: p, IsExpansion: i > 0})
+		}
+	}
+	return rows
+}
+
 // ListStashes returns stash entries for the given repo path.
 func ListStashes(repoPath string) ([]Stash, error) {
 	text, err := gitCmd(repoPath, "stash", "list", "--format=%gd%x00%ai%x00%s")
@@ -54,67 +94,6 @@ func StashDiff(repoPath string, index int) (string, error) {
 		return "", fmt.Errorf("stash diff for %s: %w", ref, err)
 	}
 	return out, nil
-}
-
-// worktreeInfo is internal data parsed from git worktree list output.
-type worktreeInfo struct {
-	path     string
-	branch   string
-	isBare   bool
-	detached bool
-}
-
-func splitWorktreeBlocks(output string) []string {
-	var blocks []string
-	var current []string
-	for _, line := range strings.Split(strings.TrimRight(output, "\n"), "\n") {
-		if line == "" {
-			if len(current) > 0 {
-				blocks = append(blocks, strings.Join(current, "\n"))
-				current = nil
-			}
-			continue
-		}
-		current = append(current, line)
-	}
-	if len(current) > 0 {
-		blocks = append(blocks, strings.Join(current, "\n"))
-	}
-	return blocks
-}
-
-func parseWorktreeBlock(block string) worktreeInfo {
-	var wt worktreeInfo
-	for _, line := range strings.Split(block, "\n") {
-		switch {
-		case strings.HasPrefix(line, "worktree "):
-			wt.path = strings.TrimPrefix(line, "worktree ")
-		case strings.HasPrefix(line, "branch refs/heads/"):
-			wt.branch = strings.TrimPrefix(line, "branch refs/heads/")
-		case line == "bare":
-			wt.isBare = true
-		case line == "detached":
-			wt.detached = true
-			wt.branch = "(detached)"
-		}
-	}
-	return wt
-}
-
-// Branch represents a local git branch with its status.
-type Branch struct {
-	Name          string
-	HasUpstream   bool
-	UpstreamGone  bool
-	Ahead         int
-	Behind        int
-	Unpushed      []string
-	IsWorktree    bool
-	WorktreePaths []string
-	Dirty         bool
-	FilesChanged  int
-	LinesAdded    int
-	LinesDeleted  int
 }
 
 const refFormat = "%(refname:short)\t%(upstream)\t%(upstream:track)"
@@ -182,6 +161,51 @@ func ListBranches(repoPath string) ([]Branch, error) {
 // BranchDiff returns the diff output for a worktree.
 func BranchDiff(worktreePath string) (string, error) {
 	return gitCmd(worktreePath, "diff", "HEAD")
+}
+
+// worktreeInfo is internal data parsed from git worktree list output.
+type worktreeInfo struct {
+	path     string
+	branch   string
+	isBare   bool
+	detached bool
+}
+
+func splitWorktreeBlocks(output string) []string {
+	var blocks []string
+	var current []string
+	for _, line := range strings.Split(strings.TrimRight(output, "\n"), "\n") {
+		if line == "" {
+			if len(current) > 0 {
+				blocks = append(blocks, strings.Join(current, "\n"))
+				current = nil
+			}
+			continue
+		}
+		current = append(current, line)
+	}
+	if len(current) > 0 {
+		blocks = append(blocks, strings.Join(current, "\n"))
+	}
+	return blocks
+}
+
+func parseWorktreeBlock(block string) worktreeInfo {
+	var wt worktreeInfo
+	for _, line := range strings.Split(block, "\n") {
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			wt.path = strings.TrimPrefix(line, "worktree ")
+		case strings.HasPrefix(line, "branch refs/heads/"):
+			wt.branch = strings.TrimPrefix(line, "branch refs/heads/")
+		case line == "bare":
+			wt.isBare = true
+		case line == "detached":
+			wt.detached = true
+			wt.branch = "(detached)"
+		}
+	}
+	return wt
 }
 
 // branchWorktreeMap returns a map of branch name -> worktree paths and detached worktree paths.

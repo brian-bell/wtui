@@ -595,3 +595,60 @@ func TestBranchDiff_EmptyForCleanWorktree(t *testing.T) {
 		t.Errorf("expected empty diff, got %q", diff)
 	}
 }
+
+func TestFlattenBranches_SinglePathGivesOneRow(t *testing.T) {
+	branches := []gitquery.Branch{
+		{Name: "main", IsWorktree: true, WorktreePaths: []string{"/dev/proj"}},
+	}
+	rows := gitquery.FlattenBranches(branches)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].WorktreePath != "/dev/proj" {
+		t.Errorf("expected WorktreePath /dev/proj, got %q", rows[0].WorktreePath)
+	}
+	if rows[0].IsExpansion {
+		t.Error("single-path row should not be IsExpansion")
+	}
+}
+
+func TestFlattenBranches_NoPathGivesOneRowEmptyPath(t *testing.T) {
+	branches := []gitquery.Branch{
+		{Name: "feature", IsWorktree: false},
+	}
+	rows := gitquery.FlattenBranches(branches)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].WorktreePath != "" {
+		t.Errorf("expected empty WorktreePath, got %q", rows[0].WorktreePath)
+	}
+	if rows[0].IsExpansion {
+		t.Error("no-path row should not be IsExpansion")
+	}
+}
+
+func TestFlattenBranches_TwoPathsExpandsToTwoRows(t *testing.T) {
+	branches := []gitquery.Branch{
+		{Name: "feat", IsWorktree: true, WorktreePaths: []string{"/dev/feat-A", "/dev/feat-B"}},
+	}
+	rows := gitquery.FlattenBranches(branches)
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(rows))
+	}
+	if rows[0].WorktreePath != "/dev/feat-A" {
+		t.Errorf("first row should have /dev/feat-A, got %q", rows[0].WorktreePath)
+	}
+	if rows[0].IsExpansion {
+		t.Error("first row should not be IsExpansion")
+	}
+	if rows[1].WorktreePath != "/dev/feat-B" {
+		t.Errorf("second row should have /dev/feat-B, got %q", rows[1].WorktreePath)
+	}
+	if !rows[1].IsExpansion {
+		t.Error("second row should be IsExpansion")
+	}
+	if rows[1].Branch.Name != "feat" {
+		t.Errorf("expansion row should retain branch name, got %q", rows[1].Branch.Name)
+	}
+}
