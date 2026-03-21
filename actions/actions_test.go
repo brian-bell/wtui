@@ -140,3 +140,37 @@ func TestForceDeleteBranch(t *testing.T) {
 		t.Error("branch should be gone after ForceDeleteBranch")
 	}
 }
+
+func TestDropStash(t *testing.T) {
+	repoPath := setupRepo(t)
+
+	// Create a file and stash it
+	if err := os.WriteFile(filepath.Join(repoPath, "file.txt"), []byte("content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, repoPath, "git", "add", ".")
+	mustRun(t, repoPath, "git", "stash")
+
+	// Confirm stash exists
+	out, _ := exec.Command("git", "-C", repoPath, "stash", "list").Output()
+	if !strings.Contains(string(out), "stash@{0}") {
+		t.Fatal("expected stash to exist before drop")
+	}
+
+	if err := actions.DropStash(repoPath, 0); err != nil {
+		t.Fatalf("DropStash returned error: %v", err)
+	}
+
+	// Stash list should be empty
+	out, _ = exec.Command("git", "-C", repoPath, "stash", "list").Output()
+	if strings.TrimSpace(string(out)) != "" {
+		t.Errorf("expected stash list empty after drop, got: %s", out)
+	}
+}
+
+func TestDropStash_Error(t *testing.T) {
+	err := actions.DropStash("/nonexistent", 0)
+	if err == nil {
+		t.Error("expected error for nonexistent repo, got nil")
+	}
+}

@@ -1158,3 +1158,78 @@ func TestModel_StatusBarMode2ShowsStashKeys(t *testing.T) {
 		t.Error("mode 2 status bar should mention '↑/↓'")
 	}
 }
+
+// --- Stash drop tests (Issue #7) ---
+
+func modelInMode2WithStashes() model.Model {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m, _ = update(m, model.StashResultMsg{RepoPath: "/dev/alpha", Stashes: testStashes()})
+	return m
+}
+
+func TestModel_DKeyInMode2OpensConfirmDialog(t *testing.T) {
+	m := modelInMode2WithStashes()
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if m.Overlay() != model.OverlayConfirm {
+		t.Errorf("expected OverlayConfirm, got %d", m.Overlay())
+	}
+	if !strings.Contains(m.ConfirmPrompt(), "stash@{0}") {
+		t.Errorf("expected prompt to contain 'stash@{0}', got %q", m.ConfirmPrompt())
+	}
+}
+
+func TestModel_DKeyInMode2WithNoStashesDoesNothing(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	// No stashes loaded
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if m.Overlay() != model.OverlayNone {
+		t.Errorf("expected OverlayNone when no stashes, got %d", m.Overlay())
+	}
+}
+
+func TestModel_StashDropConfirmReturnsStashDroppedMsg(t *testing.T) {
+	m := modelInMode2WithStashes()
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if cmd == nil {
+		t.Fatal("expected cmd after stash drop confirm, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.StashDroppedMsg); !ok {
+		t.Errorf("expected StashDroppedMsg, got %T", msg)
+	}
+}
+
+func TestModel_StashDroppedMsgTriggersStashFetch(t *testing.T) {
+	m := model.New(testRepos())
+	_, cmd := update(m, model.StashDroppedMsg{RepoPath: "/dev/alpha"})
+	if cmd == nil {
+		t.Fatal("expected fetchStashes cmd after StashDroppedMsg, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.StashResultMsg); !ok {
+		t.Errorf("expected StashResultMsg, got %T", msg)
+	}
+}
+
+func TestModel_StaleStashDroppedMsgIgnored(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyTab}) // select bravo
+	_, cmd := update(m, model.StashDroppedMsg{RepoPath: "/dev/alpha"})
+	if cmd != nil {
+		t.Error("expected stale StashDroppedMsg to be ignored")
+	}
+}
+
+func TestModel_StatusBarMode2ShowsDropHint(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRight}) // mode 2
+
+	view := m.View()
+	if !strings.Contains(view, "d: drop") {
+		t.Error("mode 2 status bar should mention 'd: drop'")
+	}
+}

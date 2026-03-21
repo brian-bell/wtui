@@ -1,6 +1,9 @@
 package actions
 
-import "os/exec"
+import (
+	"fmt"
+	"os/exec"
+)
 
 // RemoveWorktree runs `git worktree remove` for the given worktree path.
 func RemoveWorktree(repoPath, worktreePath string) error {
@@ -20,4 +23,10 @@ func DeleteBranch(repoPath, name string) error {
 // ForceDeleteBranch runs `git branch -D`.
 func ForceDeleteBranch(repoPath, name string) error {
 	return exec.Command("git", "-C", repoPath, "branch", "-D", name).Run()
+}
+
+// DropStash runs `git stash drop stash@{N}`.
+func DropStash(repoPath string, index int) error {
+	ref := fmt.Sprintf("stash@{%d}", index)
+	return exec.Command("git", "-C", repoPath, "stash", "drop", ref).Run()
 }

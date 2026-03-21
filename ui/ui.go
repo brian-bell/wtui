@@ -131,7 +131,7 @@ func RenderStatusBar(width, mode, overlay int) string {
 	} else if overlay != 0 {
 		hints = "  ↑/↓ scroll  esc: close"
 	} else if mode == 2 {
-		hints = "  ↑/↓ select  enter: diff  tab: repo  ←/→: mode  r: refresh  q/esc: quit"
+		hints = "  ↑/↓ select  enter: diff  d: drop  tab: repo  ←/→: mode  r: refresh  q/esc: quit"
 	} else {
 		hints = "  ↑/↓ enter  " + cleanStyle.Render("✔") + " clean  " + aheadBehindStyle.Render("●") + " ahead/behind  " + dirtyRedStyle.Render("●") + " dirty  " + noUpstreamStyle.Render("●") + " no upstream  d: delete  r: refresh  tab: repo  ←/→: mode  q/esc: quit"
 	}

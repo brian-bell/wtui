@@ -65,6 +65,11 @@ type BranchDeletedMsg struct {
 	RepoPath string
 }
 
+// StashDroppedMsg is sent when a stash drop completes.
+type StashDroppedMsg struct {
+	RepoPath string
+}
+
 // DeleteFailedMsg is sent when a delete operation fails and a force retry is available.
 type DeleteFailedMsg struct {
 	RepoPath    string
@@ -141,6 +146,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if row, ok := m.selectedRow(); ok && row.Branch.Name == msg.BranchName {
 				m.overlayDiff = msg.Diff
 			}
+		}
+	case StashDroppedMsg:
+		if m.selected < len(m.repos) && msg.RepoPath == m.repos[m.selected].Path {
+			if m.stashSelected >= len(m.stashes)-1 && m.stashSelected > 0 {
+				m.stashSelected--
+			}
+			return m, m.fetchStashes()
 		}
 	case WorktreeRemovedMsg:
 		if m.selected < len(m.repos) && msg.RepoPath == m.repos[m.selected].Path {
@@ -281,6 +293,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.fetchStashDiff()
 		}
 	case "d":
+		if m.mode == ModeStashes && len(m.stashes) > 0 && len(m.repos) > 0 {
+			idx := m.stashes[m.stashSelected].Index
+			repoPath := m.repos[m.selected].Path
+			m.confirmPrompt = fmt.Sprintf("Drop stash@{%d}? (y/n)", idx)
+			m.confirmAction = func() tea.Cmd {
+				return func() tea.Msg {
+					_ = actions.DropStash(repoPath, idx)
+					return StashDroppedMsg{RepoPath: repoPath}
+				}
+			}
+			m.overlay = OverlayConfirm
+		}
 		if m.mode == ModeBranches && len(m.repos) > 0 {
 			row, ok := m.selectedRow()
 			if !ok {

@@ -35,6 +35,7 @@ WORKTREE_ROOT=~/projects ./bin/wt
 | `→`/`l` | Switch to next mode |
 | `1`/`2` | Jump to branches / stashes mode |
 | `enter` | View dirty branch diff in branches mode or stash diff in stashes mode |
+| `d` | Delete branch/worktree (branches mode) or drop stash (stashes mode) |
 | `esc`/`q` | Close overlay or quit |
 
 ### Branches view (mode 1)
@@ -50,7 +51,7 @@ Worktree branches are annotated with `[<path>]`. If the same branch is checked o
 
 ### Stashes view (mode 2)
 
-Browse stashes for the selected repo. Use `↑`/`↓` to select a stash, `enter` to view its diff in a full-screen overlay.
+Browse stashes for the selected repo. Use `↑`/`↓` to select a stash, `enter` to view its diff in a full-screen overlay, `d` to drop the selected stash (with confirmation).
 
 ## Configuration
 
