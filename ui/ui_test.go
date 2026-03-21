@@ -9,26 +9,8 @@ import (
 	"github.com/brian-bell/wt/scanner"
 )
 
-func TestStatusBar_ActiveModeIsBracketed(t *testing.T) {
-	bar := RenderStatusBar(120, 1, 0)
-	if !strings.Contains(bar, "[1] branches") {
-		t.Error("active mode 1 should be bracketed")
-	}
-	if strings.Contains(bar, "[2]") {
-		t.Error("inactive modes should not be bracketed")
-	}
-
-	bar = RenderStatusBar(120, 2, 0)
-	if !strings.Contains(bar, "[2] stashes") {
-		t.Error("active mode 2 should be bracketed")
-	}
-	if strings.Contains(bar, "[1]") {
-		t.Error("inactive modes should not be bracketed")
-	}
-}
-
 func TestStatusBar_Mode1ContainsIndicatorLegend(t *testing.T) {
-	bar := RenderStatusBar(120, 1, 0)
+	bar := RenderStatusBar(120, 1, 0, 1)
 	for _, legend := range []string{"✔ clean", "● ahead/behind", "● dirty", "● no upstream"} {
 		if !strings.Contains(bar, legend) {
 			t.Errorf("mode 1 status bar should contain legend %q", legend)
@@ -36,19 +18,141 @@ func TestStatusBar_Mode1ContainsIndicatorLegend(t *testing.T) {
 	}
 }
 
+func TestStatusBar_IndicatorLegendSpacing(t *testing.T) {
+	bar := RenderStatusBar(120, 1, 0, 1)
+	for _, pair := range [][2]string{
+		{"clean", "●"},
+	} {
+		a := strings.Index(bar, pair[0])
+		b := strings.Index(bar[a+len(pair[0]):], pair[1])
+		if a == -1 || b == -1 {
+			t.Errorf("expected both %q and %q in bar", pair[0], pair[1])
+			continue
+		}
+		gap := bar[a+len(pair[0]) : a+len(pair[0])+b]
+		if gap != "  " {
+			t.Errorf("expected 2 spaces between legend items, got %q", gap)
+		}
+	}
+}
+
 func TestStatusBar_Mode2OmitsIndicatorLegend(t *testing.T) {
-	bar := RenderStatusBar(120, 2, 0)
+	bar := RenderStatusBar(120, 2, 0, 1)
 	if strings.Contains(bar, "clean") {
 		t.Error("mode 2 status bar should not contain indicator legend")
 	}
 }
 
-func TestStatusBar_ContainsHints(t *testing.T) {
-	bar := RenderStatusBar(120, 1, 0)
-	for _, hint := range []string{"tab: repo", "←/→: mode", "q/esc: quit"} {
-		if !strings.Contains(bar, hint) {
-			t.Errorf("status bar should contain %q", hint)
+func TestStatusBar_PipeSeparatesLegendAndHints(t *testing.T) {
+	bar := RenderStatusBar(120, 1, 0, 1)
+	upstreamIdx := strings.Index(bar, "no upstream")
+	tabIdx := strings.Index(bar, "tab: pane")
+	if upstreamIdx == -1 || tabIdx == -1 {
+		t.Fatalf("expected both 'no upstream' and 'tab: pane' in bar: %q", bar)
+	}
+	between := bar[upstreamIdx+len("no upstream") : tabIdx]
+	if !strings.Contains(between, "|") {
+		t.Errorf("expected pipe separator between legend and hints, got %q", between)
+	}
+}
+
+func TestStatusBar_TabAndQuitBeforeOtherHints(t *testing.T) {
+	bar := RenderStatusBar(120, 1, 0, 1)
+	tabIdx := strings.Index(bar, "tab: pane")
+	tIdx := strings.Index(bar, "t: terminal")
+	if tabIdx == -1 || tIdx == -1 {
+		t.Fatalf("expected both hints in bar: %q", bar)
+	}
+	if tabIdx > tIdx {
+		t.Error("tab: pane should appear before t: terminal")
+	}
+	qIdx := strings.Index(bar, "q/esc: quit")
+	if qIdx > tIdx {
+		t.Error("q/esc: quit should appear before t: terminal")
+	}
+}
+
+func TestStatusBar_ActionHintsHiddenWhenLeftPaneActive(t *testing.T) {
+	bar := RenderStatusBar(120, 1, 0, 0) // activePane=0 (left)
+	for _, hint := range []string{"t: terminal", "c: code", "d: delete"} {
+		if strings.Contains(bar, hint) {
+			t.Errorf("hint %q should be hidden when left pane is active", hint)
 		}
+	}
+	// tab and q/esc should still appear
+	for _, hint := range []string{"tab: pane", "q/esc: quit"} {
+		if !strings.Contains(bar, hint) {
+			t.Errorf("hint %q should appear even when left pane is active", hint)
+		}
+	}
+}
+
+func TestStatusBar_ActionHintsShownWhenRightPaneActive(t *testing.T) {
+	bar := RenderStatusBar(120, 1, 0, 1) // activePane=1 (right)
+	for _, hint := range []string{"t: terminal", "c: code", "d: delete"} {
+		if !strings.Contains(bar, hint) {
+			t.Errorf("hint %q should be shown when right pane is active", hint)
+		}
+	}
+}
+
+func TestStatusBar_KeyHintSpacingIs2(t *testing.T) {
+	bar := RenderStatusBar(120, 1, 0, 1)
+	for _, pair := range [][2]string{
+		{"tab: pane", "q/esc: quit"},
+		{"t: terminal", "c: code"},
+		{"c: code", "d: delete"},
+	} {
+		a := strings.Index(bar, pair[0])
+		b := strings.Index(bar, pair[1])
+		if a == -1 || b == -1 {
+			t.Errorf("expected both %q and %q in bar", pair[0], pair[1])
+			continue
+		}
+		gap := bar[a+len(pair[0]) : b]
+		if gap != "  " {
+			t.Errorf("expected 2 spaces between %q and %q, got %q", pair[0], pair[1], gap)
+		}
+	}
+}
+
+func TestModeHeader_ShowsActiveMode(t *testing.T) {
+	header := renderModeHeader(1, 40)
+	if !strings.Contains(header, "[1] branches") {
+		t.Error("mode header should show active mode 1 bracketed")
+	}
+	if strings.Contains(header, "[2]") {
+		t.Error("inactive mode 2 should not be bracketed")
+	}
+	header = renderModeHeader(2, 40)
+	if !strings.Contains(header, "[2] stashes") {
+		t.Error("mode header should show active mode 2 bracketed")
+	}
+}
+
+func TestModeHeader_HasSeparatorLine(t *testing.T) {
+	header := renderModeHeader(1, 40)
+	lines := strings.Split(header, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected mode header to have at least 2 lines, got %d", len(lines))
+	}
+	// Second line should be a separator (dashes or similar)
+	separator := lines[1]
+	if !strings.Contains(separator, "─") {
+		t.Errorf("expected separator line with ─ chars, got %q", separator)
+	}
+}
+
+func TestRender_ModeHeaderInRightPane(t *testing.T) {
+	view := Render(RenderParams{
+		Repos:    []scanner.Repo{{Path: "/a", DisplayName: "alpha"}},
+		Selected: 0,
+		Width:    80,
+		Height:   10,
+		Mode:     1,
+	})
+	if !strings.Contains(view, "[1] branches") {
+		t.Error("render should contain mode header '[1] branches' in right pane")
 	}
 }
 
@@ -61,7 +165,7 @@ func TestRepoList_ScrollsWhenSelectionExceedsHeight(t *testing.T) {
 		{Path: "/e", DisplayName: "echo"},
 	}
 	// Height of 3 means only 3 visible at a time
-	lines := renderRepoList(repos, 4, 3) // selected=4 (echo), height=3
+	lines := renderRepoList(repos, 4, LeftPaneWidth-2, 3) // selected=4 (echo), height=3
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "echo") {
 		t.Error("selected item 'echo' should be visible")
@@ -242,6 +346,7 @@ func TestRender_HighlightsSelectedBranch(t *testing.T) {
 			{Branch: gitquery.Branch{Name: "dirty", IsWorktree: true, Dirty: true}, WorktreePath: "/a"},
 		},
 		BranchSelected: 0,
+		ActivePane:     1,
 	})
 	if !strings.Contains(view, "> clean") {
 		t.Error("first branch should be highlighted when BranchSelected=0")
@@ -263,12 +368,52 @@ func TestRender_HighlightsSecondBranch(t *testing.T) {
 			{Branch: gitquery.Branch{Name: "dirty", IsWorktree: true, Dirty: true}, WorktreePath: "/a"},
 		},
 		BranchSelected: 1,
+		ActivePane:     1,
 	})
-	if !strings.Contains(view, "> [root] dirty") {
+	if !strings.Contains(view, "> dirty") {
 		t.Error("dirty branch should be highlighted when BranchSelected=1")
 	}
 	if strings.Contains(view, "> clean") {
 		t.Error("clean branch should not be highlighted when BranchSelected=1")
+	}
+}
+
+func TestRender_HidesCursorWhenLeftPaneActive(t *testing.T) {
+	view := Render(RenderParams{
+		Repos:    []scanner.Repo{{Path: "/a", DisplayName: "alpha"}},
+		Selected: 0,
+		Width:    80,
+		Height:   10,
+		Mode:     1,
+		Branches: []gitquery.BranchRow{
+			{Branch: gitquery.Branch{Name: "main"}},
+		},
+		BranchSelected: 0,
+		ActivePane:     0,
+	})
+	if strings.Contains(view, "> main") {
+		t.Error("branch cursor should be hidden when left pane is active")
+	}
+}
+
+func TestBranchPane_CursorDoesNotShiftBranchName(t *testing.T) {
+	rows := []gitquery.BranchRow{
+		{Branch: gitquery.Branch{Name: "first", HasUpstream: true}},
+		{Branch: gitquery.Branch{Name: "second", HasUpstream: true}},
+	}
+	// Render with no selection (selected = -1)
+	unselected := renderBranchPaneSelected(rows, -1, 0, 80, 10, "/dev/alpha")
+	// Render with first selected
+	selected := renderBranchPaneSelected(rows, 0, 0, 80, 10, "/dev/alpha")
+
+	// Find position of "first" in both renders — should be at the same column
+	unselIdx := strings.Index(unselected[0], "first")
+	selIdx := strings.Index(selected[0], "first")
+	if unselIdx == -1 || selIdx == -1 {
+		t.Fatalf("branch name 'first' not found in output: unsel=%q sel=%q", unselected[0], selected[0])
+	}
+	if unselIdx != selIdx {
+		t.Errorf("branch name shifts when selected: unselected col %d, selected col %d", unselIdx, selIdx)
 	}
 }
 
@@ -351,7 +496,7 @@ func TestRender_ConfirmDialogShowsPrompt(t *testing.T) {
 		Width:         80,
 		Height:        24,
 		Mode:          1,
-		Overlay:       int(3), // OverlayConfirm
+		Overlay:       3,
 		ConfirmPrompt: "Remove worktree /dev/alpha/feat? (y/n)",
 	})
 	if !strings.Contains(view, "Remove worktree /dev/alpha/feat") {
@@ -368,7 +513,7 @@ func TestRender_ForceConfirmDialogShowsPrompt(t *testing.T) {
 		Width:         80,
 		Height:        24,
 		Mode:          1,
-		Overlay:       int(3), // OverlayConfirm
+		Overlay:       3,
 		ConfirmPrompt: "Force delete /dev/alpha/feat? (y/n)",
 		ConfirmForce:  true,
 	})
@@ -377,21 +522,23 @@ func TestRender_ForceConfirmDialogShowsPrompt(t *testing.T) {
 	}
 }
 
-func TestStatusBar_ShowsRefreshHint(t *testing.T) {
-	bar := RenderStatusBar(120, 1, 0)
-	if !strings.Contains(bar, "r: refresh") {
-		t.Errorf("status bar should contain 'r: refresh', got: %q", bar)
-	}
-	bar = RenderStatusBar(120, 2, 0)
-	if !strings.Contains(bar, "r: refresh") {
-		t.Errorf("mode 2 status bar should contain 'r: refresh', got: %q", bar)
-	}
-}
-
-func TestStatusBar_ShowsDeleteHintInMode1(t *testing.T) {
-	bar := RenderStatusBar(120, 1, 0)
-	if !strings.Contains(bar, "d: delete") {
-		t.Errorf("mode 1 status bar should always contain 'd: delete', got: %q", bar)
+func TestStatusBar_Mode2HintsSpacing(t *testing.T) {
+	bar := RenderStatusBar(120, 2, 0, 1)
+	for _, pair := range [][2]string{
+		{"tab: pane", "q/esc: quit"},
+		{"↑/↓ select", "enter: diff"},
+		{"enter: diff", "d: drop"},
+	} {
+		a := strings.Index(bar, pair[0])
+		b := strings.Index(bar, pair[1])
+		if a == -1 || b == -1 {
+			t.Errorf("expected both %q and %q in bar", pair[0], pair[1])
+			continue
+		}
+		gap := bar[a+len(pair[0]) : b]
+		if gap != "  " {
+			t.Errorf("expected 2 spaces between %q and %q, got %q", pair[0], pair[1], gap)
+		}
 	}
 }
 
@@ -416,7 +563,7 @@ func TestBranchPane_MultiWorktreeExpandsRows(t *testing.T) {
 	}
 }
 
-func TestBranchPane_MainWorktreeShowsRootLabel(t *testing.T) {
+func TestBranchPane_MainWorktreeShowsRootLabelAfterIndicators(t *testing.T) {
 	rows := []gitquery.BranchRow{
 		{Branch: gitquery.Branch{Name: "main", HasUpstream: true, IsWorktree: true}, WorktreePath: "/dev/alpha"},
 	}
@@ -424,6 +571,12 @@ func TestBranchPane_MainWorktreeShowsRootLabel(t *testing.T) {
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "[root]") {
 		t.Errorf("main worktree branch should show [root] label, got: %q", joined)
+	}
+	// [root] should appear after the branch name, not before
+	mainIdx := strings.Index(joined, "main")
+	rootIdx := strings.Index(joined, "[root]")
+	if mainIdx == -1 || rootIdx == -1 || rootIdx < mainIdx {
+		t.Errorf("expected [root] after branch name 'main', got: %q", joined)
 	}
 }
 
@@ -449,15 +602,5 @@ func TestBranchPane_NonWorktreeBranchShowsNoLabel(t *testing.T) {
 	joined := strings.Join(lines, "\n")
 	if strings.Contains(joined, "[root]") {
 		t.Error("non-worktree branch should not show [root]")
-	}
-}
-
-func TestStatusBar_Mode1ShowsOpenHints(t *testing.T) {
-	bar := RenderStatusBar(120, 1, 0)
-	if !strings.Contains(bar, "t: terminal") {
-		t.Errorf("mode 1 status bar should contain 't: terminal', got: %q", bar)
-	}
-	if !strings.Contains(bar, "c: code") {
-		t.Errorf("mode 1 status bar should contain 'c: code', got: %q", bar)
 	}
 }

@@ -26,17 +26,33 @@ WORKTREE_ROOT=~/projects ./bin/wt
 
 ### Keys
 
+The UI has two panes: repos on the left, content on the right. `tab` switches focus between them. The active pane is highlighted with a blue border.
+
+**Left pane (repos)**
+
 | Key | Action |
 |-----|--------|
-| `tab` | Cycle to next repo (wrapping) |
-| `↑`/`k` | Move selection up in right pane |
-| `↓`/`j` | Move selection down in right pane |
-| `←`/`h` | Switch to previous mode |
-| `→`/`l` | Switch to next mode |
-| `1`/`2` | Jump to branches / stashes mode |
-| `enter` | View dirty branch diff in branches mode or stash diff in stashes mode |
-| `d` | Delete branch/worktree (branches mode) or drop stash (stashes mode) |
-| `esc`/`q` | Close overlay or quit |
+| `↑`/`k` | Select previous repo |
+| `↓`/`j` | Select next repo |
+| `tab` | Switch focus to right pane |
+| `q`/`esc` | Quit |
+
+**Right pane (content)**
+
+| Key | Action |
+|-----|--------|
+| `↑`/`k` | Move selection up |
+| `↓`/`j` | Move selection down |
+| `1`/`2` | Switch to branches / stashes mode |
+| `←`/`h`/`→`/`l` | Switch mode |
+| `enter` | View diff (dirty branch or stash) |
+| `d` | Delete branch/worktree or drop stash (with confirmation) |
+| `t` | Open terminal at worktree path |
+| `c` | Open VSCode at worktree path |
+| `tab` | Switch focus to left pane |
+| `q`/`esc` | Close overlay or quit |
+
+The right pane header shows the active mode (`[1] branches` or `[2] stashes`). Press `1` or `2` to switch.
 
 ### Branches view (mode 1)
 
@@ -47,7 +63,7 @@ The right pane shows all local branches alphabetically with stacking indicators:
 - `●` red: dirty worktree — shows `N files +X/-Y` (lines added/deleted)
 - `●` purple: no upstream or upstream gone
 
-Worktree branches are annotated with `[<path>]`. If the same branch is checked out in more than one worktree, the UI shows `[<path1>, <path2>, ...]`. Detached worktrees appear as `(detached)` rows with their path annotation. Branches ahead of upstream show up to 5 unpushed commit messages, with overflow count. When a branch is dirty and is a worktree, `enter` opens a full-screen diff overlay for that worktree.
+Worktree branches are annotated with `[root]` (repo root) or `[<path>]` (additional worktrees). Multi-checkout branches expand to one row per worktree. Detached worktrees appear as `(detached)` rows with their path annotation. Branches ahead of upstream show up to 5 unpushed commit messages, with overflow count. When a branch is dirty and is a worktree, `enter` opens a full-screen diff overlay. `t`/`c` open a terminal or VSCode at the worktree path. `d` removes the worktree (or deletes the branch for non-worktree branches), with a force-retry prompt on failure.
 
 ### Stashes view (mode 2)
 
