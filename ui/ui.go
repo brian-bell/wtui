@@ -391,15 +391,23 @@ func stashEntrySelected(date string, msgRunes []rune, msgAvail, width int) []str
 }
 
 func stashEntryNormal(date string, msgRunes []rune, msgAvail, width int) []string {
-	dateStr := stashDateStyle.Render(date)
-
+	// Truncate message runes at the raw level before applying styles, so that
+	// the safety-net path never has to strip bytes from ANSI escape sequences.
 	if len(msgRunes) <= msgAvail {
-		msgStr := stashMsgStyle.Render(string(msgRunes))
-		line := fmt.Sprintf("   %s  %s", dateStr, msgStr)
-		return []string{truncateToWidth(line, width)}
+		rawLine := fmt.Sprintf("   %s  %s", date, string(msgRunes))
+		if lipgloss.Width(rawLine) > width {
+			// Trim raw runes until the unstyled line fits, then re-slice msgRunes.
+			for lipgloss.Width(rawLine) > width && len(msgRunes) > 0 {
+				msgRunes = msgRunes[:len(msgRunes)-1]
+				rawLine = fmt.Sprintf("   %s  %s", date, string(msgRunes))
+			}
+		}
+		line := fmt.Sprintf("   %s  %s", stashDateStyle.Render(date), stashMsgStyle.Render(string(msgRunes)))
+		return []string{line}
 	}
 
-	// Two lines
+	// Two lines — content is pre-bounded by msgAvail/line2Avail so no
+	// truncation is expected, but guard at the raw level just in case.
 	line1Msg := string(msgRunes[:msgAvail])
 	line2Runes := msgRunes[msgAvail:]
 	indent := strings.Repeat(" ", stashEntryOverhead)
@@ -408,9 +416,9 @@ func stashEntryNormal(date string, msgRunes []rune, msgAvail, width int) []strin
 		line2Runes = line2Runes[:line2Avail]
 	}
 
-	line1 := fmt.Sprintf("   %s  %s", dateStr, stashMsgStyle.Render(line1Msg))
+	line1 := fmt.Sprintf("   %s  %s", stashDateStyle.Render(date), stashMsgStyle.Render(line1Msg))
 	line2 := indent + stashMsgStyle.Render(string(line2Runes))
-	return []string{truncateToWidth(line1, width), truncateToWidth(line2, width)}
+	return []string{line1, line2}
 }
 
 func renderOverlay(p RenderParams) string {
