@@ -5,14 +5,21 @@ import (
 	"os/exec"
 )
 
-// RemoveWorktree runs `git worktree remove` for the given worktree path.
+// RemoveWorktree runs `git worktree remove` for the given worktree path,
+// then prunes stale references to ensure the worktree no longer appears
+// in listings.
 func RemoveWorktree(repoPath, worktreePath string) error {
-	return exec.Command("git", "-C", repoPath, "worktree", "remove", worktreePath).Run()
+	err := exec.Command("git", "-C", repoPath, "worktree", "remove", worktreePath).Run()
+	_ = exec.Command("git", "-C", repoPath, "worktree", "prune").Run()
+	return err
 }
 
-// ForceRemoveWorktree runs `git worktree remove --force`.
+// ForceRemoveWorktree runs `git worktree remove --force`, then prunes
+// stale references.
 func ForceRemoveWorktree(repoPath, worktreePath string) error {
-	return exec.Command("git", "-C", repoPath, "worktree", "remove", "--force", worktreePath).Run()
+	err := exec.Command("git", "-C", repoPath, "worktree", "remove", "--force", worktreePath).Run()
+	_ = exec.Command("git", "-C", repoPath, "worktree", "prune").Run()
+	return err
 }
 
 // DeleteBranch runs `git branch -d`.

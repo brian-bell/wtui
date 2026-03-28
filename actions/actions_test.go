@@ -98,6 +98,63 @@ func TestForceRemoveWorktree(t *testing.T) {
 	}
 }
 
+func TestRemoveWorktree_PrunesStaleReference(t *testing.T) {
+	repoPath := setupRepo(t)
+	worktreePath := filepath.Join(filepath.Dir(repoPath), "wt-prune")
+	mustRun(t, repoPath, "git", "worktree", "add", worktreePath, "-b", "prune-feat")
+
+	// Remove normally, then re-create a stale admin reference to simulate
+	// older git versions that don't clean up .git/worktrees/ on remove.
+	mustRun(t, repoPath, "git", "worktree", "remove", worktreePath)
+
+	// Synthetically recreate the admin entry pointing to a non-existent path
+	adminDir := filepath.Join(repoPath, ".git", "worktrees", "wt-prune")
+	os.MkdirAll(adminDir, 0755)
+	os.WriteFile(filepath.Join(adminDir, "gitdir"), []byte(worktreePath+"/.git\n"), 0644)
+	headBytes, _ := exec.Command("git", "-C", repoPath, "rev-parse", "HEAD").Output()
+	os.WriteFile(filepath.Join(adminDir, "HEAD"), headBytes, 0644)
+
+	// Confirm the stale reference appears
+	out, _ := exec.Command("git", "-C", repoPath, "worktree", "list", "--porcelain").Output()
+	if !strings.Contains(string(out), worktreePath) {
+		t.Fatal("expected synthetic stale reference to appear in worktree list")
+	}
+
+	// RemoveWorktree should prune the stale reference
+	_ = actions.RemoveWorktree(repoPath, worktreePath)
+
+	out, _ = exec.Command("git", "-C", repoPath, "worktree", "list", "--porcelain").Output()
+	if strings.Contains(string(out), worktreePath) {
+		t.Errorf("stale worktree reference should be pruned:\n%s", out)
+	}
+}
+
+func TestForceRemoveWorktree_PrunesStaleReference(t *testing.T) {
+	repoPath := setupRepo(t)
+	worktreePath := filepath.Join(filepath.Dir(repoPath), "wt-force-prune")
+	mustRun(t, repoPath, "git", "worktree", "add", worktreePath, "-b", "force-prune-feat")
+	mustRun(t, repoPath, "git", "worktree", "remove", worktreePath)
+
+	// Synthetically recreate a stale admin entry
+	adminDir := filepath.Join(repoPath, ".git", "worktrees", "wt-force-prune")
+	os.MkdirAll(adminDir, 0755)
+	os.WriteFile(filepath.Join(adminDir, "gitdir"), []byte(worktreePath+"/.git\n"), 0644)
+	headBytes, _ := exec.Command("git", "-C", repoPath, "rev-parse", "HEAD").Output()
+	os.WriteFile(filepath.Join(adminDir, "HEAD"), headBytes, 0644)
+
+	out, _ := exec.Command("git", "-C", repoPath, "worktree", "list", "--porcelain").Output()
+	if !strings.Contains(string(out), worktreePath) {
+		t.Fatal("expected synthetic stale reference")
+	}
+
+	_ = actions.ForceRemoveWorktree(repoPath, worktreePath)
+
+	out, _ = exec.Command("git", "-C", repoPath, "worktree", "list", "--porcelain").Output()
+	if strings.Contains(string(out), worktreePath) {
+		t.Errorf("stale worktree reference should be pruned after force remove:\n%s", out)
+	}
+}
+
 func TestDeleteBranch(t *testing.T) {
 	repoPath := setupRepo(t)
 	// Create and merge a branch so -d works
