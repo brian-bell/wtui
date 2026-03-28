@@ -310,8 +310,8 @@ func renderBranchPaneSelected(rows []gitquery.BranchRow, selected, scroll, width
 	}
 
 	// Apply scroll offset
-	if scroll > len(content) {
-		scroll = len(content)
+	if scroll >= len(content) {
+		scroll = max(0, len(content)-1)
 	}
 	visible := content[scroll:]
 
