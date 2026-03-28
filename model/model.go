@@ -17,6 +17,7 @@ type Mode int
 const (
 	ModeBranches Mode = iota + 1
 	ModeStashes
+	ModeHistory
 )
 
 // OverlayState represents what overlay (if any) is displayed.
@@ -27,6 +28,7 @@ const (
 	OverlayStashDiff
 	OverlayBranchDiff
 	OverlayConfirm
+	OverlayCommitDiff
 )
 
 // --- Messages ---
@@ -69,6 +71,19 @@ type WorktreePrunedMsg struct {
 	RepoPath string
 }
 
+type CommitResultMsg struct {
+	RepoPath string
+	Commits  []gitquery.Commit
+}
+
+type CommitDiffResultMsg struct {
+	RepoPath string
+	Hash     string
+	Diff     string
+}
+
+type ClipboardResultMsg struct{}
+
 type DeleteFailedMsg struct {
 	RepoPath    string
 	Target      string       // worktree path or branch name
@@ -88,6 +103,9 @@ type Model struct {
 	stashes        []gitquery.Stash
 	branchSelected int
 	stashSelected  int
+	commits        []gitquery.Commit
+	commitSelected int
+	commitScroll   int
 	overlay        OverlayState
 	overlayDiff    string
 	overlayScroll  int
@@ -114,6 +132,9 @@ func (m Model) Rows() []gitquery.BranchRow { return m.rows }
 func (m Model) Stashes() []gitquery.Stash  { return m.stashes }
 func (m Model) BranchSelected() int        { return m.branchSelected }
 func (m Model) StashSelected() int         { return m.stashSelected }
+func (m Model) Commits() []gitquery.Commit { return m.commits }
+func (m Model) CommitSelected() int        { return m.commitSelected }
+func (m Model) CommitScroll() int          { return m.commitScroll }
 func (m Model) Overlay() OverlayState      { return m.overlay }
 func (m Model) OverlayDiff() string        { return m.overlayDiff }
 func (m Model) OverlayScroll() int         { return m.overlayScroll }
@@ -151,6 +172,9 @@ func (m Model) View() string {
 		ActivePane:     m.activePane,
 		Destructive:    m.destructive,
 		StaleSelected:  m.isSelectedStale(),
+		Commits:        m.commits,
+		CommitSelected: m.commitSelected,
+		CommitScroll:   m.commitScroll,
 	})
 }
 
@@ -181,6 +205,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleBranchDeleted(msg)
 	case WorktreePrunedMsg:
 		return m.handleWorktreePruned(msg)
+	case CommitResultMsg:
+		return m.handleCommitResult(msg), nil
+	case CommitDiffResultMsg:
+		return m.handleCommitDiffResult(msg), nil
+	case ClipboardResultMsg:
+		return m, nil
 	case DeleteFailedMsg:
 		return m.handleDeleteFailed(msg), nil
 	}
@@ -284,19 +314,25 @@ func (m Model) handleRightPaneKey(key string) (tea.Model, tea.Cmd) {
 			m.mode--
 			m.branchSelected = 0
 			m.stashSelected = 0
+			m.commitSelected = 0
+			m.commitScroll = 0
 			return m, m.fetchForMode()
 		}
 	case "right", "l":
-		if m.mode < ModeStashes {
+		if m.mode < ModeHistory {
 			m.mode++
 			m.branchSelected = 0
 			m.stashSelected = 0
+			m.commitSelected = 0
+			m.commitScroll = 0
 			return m, m.fetchForMode()
 		}
 	case "1":
 		if m.mode != ModeBranches {
 			m.mode = ModeBranches
 			m.branchSelected = 0
+			m.commitSelected = 0
+			m.commitScroll = 0
 			return m, m.fetchBranches()
 		}
 	case "2":
@@ -304,8 +340,19 @@ func (m Model) handleRightPaneKey(key string) (tea.Model, tea.Cmd) {
 			m.mode = ModeStashes
 			m.branchSelected = 0
 			m.stashSelected = 0
+			m.commitSelected = 0
+			m.commitScroll = 0
 			return m, m.fetchStashes()
 		}
+	case "3":
+		if m.mode != ModeHistory {
+			m.mode = ModeHistory
+			m.commitSelected = 0
+			m.commitScroll = 0
+			return m, m.fetchCommits()
+		}
+	case "y":
+		return m.handleCopyHash()
 	case "tab":
 		m.activePane = 0
 	case "enter":
@@ -344,6 +391,14 @@ func (m Model) handleCursorUp() (tea.Model, tea.Cmd) {
 		}
 		m = m.ensureStashVisible()
 	}
+	if m.mode == ModeHistory && len(m.commits) > 0 {
+		if m.commitSelected > 0 {
+			m.commitSelected--
+		} else {
+			m.commitSelected = len(m.commits) - 1
+		}
+		m = m.ensureCommitVisible()
+	}
 	return m, nil
 }
 
@@ -365,6 +420,14 @@ func (m Model) handleCursorDown() (tea.Model, tea.Cmd) {
 		}
 		m = m.ensureStashVisible()
 	}
+	if m.mode == ModeHistory && len(m.commits) > 0 {
+		if m.commitSelected < len(m.commits)-1 {
+			m.commitSelected++
+		} else {
+			m.commitSelected = 0
+		}
+		m = m.ensureCommitVisible()
+	}
 	return m, nil
 }
 
@@ -379,11 +442,18 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 		m.overlay = OverlayStashDiff
 		return m, m.fetchStashDiff()
 	}
+	if m.mode == ModeHistory && len(m.commits) > 0 {
+		m.overlay = OverlayCommitDiff
+		return m, m.fetchCommitDiff()
+	}
 	return m, nil
 }
 
 func (m Model) handleDelete() (tea.Model, tea.Cmd) {
 	if !m.destructive {
+		return m, nil
+	}
+	if m.mode == ModeHistory {
 		return m, nil
 	}
 	if m.mode == ModeStashes && len(m.stashes) > 0 && len(m.repos) > 0 {
@@ -420,6 +490,10 @@ func (m Model) handlePrune() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleOpenTerminal() (tea.Model, tea.Cmd) {
+	if m.mode == ModeHistory && len(m.repos) > 0 {
+		path := m.repos[m.selected].Path
+		return m, func() tea.Msg { _ = actions.OpenTerminal(path); return nil }
+	}
 	if m.mode == ModeBranches && len(m.repos) > 0 {
 		if row, ok := m.selectedRow(); ok && row.WorktreePath != "" {
 			path := row.WorktreePath
@@ -430,6 +504,10 @@ func (m Model) handleOpenTerminal() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleOpenCode() (tea.Model, tea.Cmd) {
+	if m.mode == ModeHistory && len(m.repos) > 0 {
+		path := m.repos[m.selected].Path
+		return m, func() tea.Msg { _ = actions.OpenVSCode(path); return nil }
+	}
 	if m.mode == ModeBranches && len(m.repos) > 0 {
 		if row, ok := m.selectedRow(); ok && row.WorktreePath != "" {
 			path := row.WorktreePath
@@ -520,8 +598,11 @@ func (m Model) resetRightPaneCursors() Model {
 	m.stashSelected = 0
 	m.branchScroll = 0
 	m.stashScroll = 0
+	m.commitSelected = 0
+	m.commitScroll = 0
 	m.rows = nil
 	m.stashes = nil
+	m.commits = nil
 	return m
 }
 
@@ -613,6 +694,36 @@ func (m Model) handleDeleteFailed(msg DeleteFailedMsg) Model {
 	return m
 }
 
+func (m Model) handleCommitResult(msg CommitResultMsg) Model {
+	if m.isCurrentRepo(msg.RepoPath) {
+		m.commits = msg.Commits
+		if len(m.commits) == 0 || m.commitSelected >= len(m.commits) {
+			m.commitSelected = 0
+		}
+	}
+	return m
+}
+
+func (m Model) handleCommitDiffResult(msg CommitDiffResultMsg) Model {
+	if m.isCurrentRepo(msg.RepoPath) {
+		if m.commitSelected < len(m.commits) && m.commits[m.commitSelected].Hash == msg.Hash {
+			m.overlayDiff = msg.Diff
+		}
+	}
+	return m
+}
+
+func (m Model) handleCopyHash() (tea.Model, tea.Cmd) {
+	if m.mode != ModeHistory || len(m.commits) == 0 {
+		return m, nil
+	}
+	hash := m.commits[m.commitSelected].Hash
+	return m, func() tea.Msg {
+		_ = actions.CopyToClipboard(hash)
+		return ClipboardResultMsg{}
+	}
+}
+
 // --- Fetch commands ---
 
 func (m Model) fetchForMode() tea.Cmd {
@@ -621,6 +732,8 @@ func (m Model) fetchForMode() tea.Cmd {
 		return m.fetchBranches()
 	case ModeStashes:
 		return m.fetchStashes()
+	case ModeHistory:
+		return m.fetchCommits()
 	}
 	return nil
 }
@@ -685,6 +798,29 @@ func (m Model) fetchStashDiff() tea.Cmd {
 	}
 }
 
+func (m Model) fetchCommits() tea.Cmd {
+	if len(m.repos) == 0 {
+		return nil
+	}
+	repoPath := m.repos[m.selected].Path
+	return func() tea.Msg {
+		commits, _ := gitquery.ListCommits(repoPath)
+		return CommitResultMsg{RepoPath: repoPath, Commits: commits}
+	}
+}
+
+func (m Model) fetchCommitDiff() tea.Cmd {
+	if len(m.repos) == 0 || len(m.commits) == 0 {
+		return nil
+	}
+	repoPath := m.repos[m.selected].Path
+	hash := m.commits[m.commitSelected].Hash
+	return func() tea.Msg {
+		diff, _ := gitquery.CommitDiff(repoPath, hash)
+		return CommitDiffResultMsg{RepoPath: repoPath, Hash: hash, Diff: diff}
+	}
+}
+
 // --- Helpers ---
 
 func (m Model) selectedRow() (gitquery.BranchRow, bool) {
@@ -736,6 +872,20 @@ func (m Model) ensureRepoVisible() Model {
 	}
 	if m.selected >= m.repoScroll+contentHeight {
 		m.repoScroll = m.selected - contentHeight + 1
+	}
+	return m
+}
+
+func (m Model) ensureCommitVisible() Model {
+	contentHeight := m.height - ui.BranchContentOverhead
+	if contentHeight <= 0 {
+		contentHeight = 16
+	}
+	if m.commitScroll > m.commitSelected {
+		m.commitScroll = m.commitSelected
+	}
+	if m.commitSelected >= m.commitScroll+contentHeight {
+		m.commitScroll = m.commitSelected - contentHeight + 1
 	}
 	return m
 }

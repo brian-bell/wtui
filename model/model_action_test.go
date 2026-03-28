@@ -99,6 +99,115 @@ func TestModel_EnterDoesNothingForCleanBranch(t *testing.T) {
 	}
 }
 
+// --- History (mode 3) actions ---
+
+func modelInMode3WithCommits() model.Model {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m, _ = update(m, model.CommitResultMsg{RepoPath: "/dev/alpha", Commits: testCommits()})
+	return m
+}
+
+func TestModel_EnterInHistoryOpensCommitDiffOverlay(t *testing.T) {
+	m := modelInMode3WithCommits()
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.Overlay() != model.OverlayCommitDiff {
+		t.Errorf("expected OverlayCommitDiff, got %d", m.Overlay())
+	}
+	if cmd == nil {
+		t.Fatal("expected fetchCommitDiff cmd, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.CommitDiffResultMsg); !ok {
+		t.Errorf("expected CommitDiffResultMsg, got %T", msg)
+	}
+}
+
+func TestModel_EnterInHistoryNoCommitsIsNoOp(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	// No commits loaded
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.Overlay() != model.OverlayNone {
+		t.Errorf("expected OverlayNone, got %d", m.Overlay())
+	}
+	if cmd != nil {
+		t.Errorf("expected nil cmd, got %T", cmd)
+	}
+}
+
+func TestModel_CommitDiffResultStoresDiff(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, model.CommitResultMsg{RepoPath: "/dev/alpha", Commits: testCommits()})
+	m, _ = update(m, model.CommitDiffResultMsg{RepoPath: "/dev/alpha", Hash: "abc1234", Diff: "diff --git a/f.txt"})
+	if m.OverlayDiff() != "diff --git a/f.txt" {
+		t.Errorf("expected diff stored, got %q", m.OverlayDiff())
+	}
+}
+
+func TestModel_StaleCommitDiffResultDiscarded(t *testing.T) {
+	m := model.New(testRepos())
+	m = selectBravo(m)
+	m, _ = update(m, model.CommitDiffResultMsg{RepoPath: "/dev/alpha", Hash: "abc1234", Diff: "stale"})
+	if m.OverlayDiff() != "" {
+		t.Errorf("expected stale commit diff discarded, got %q", m.OverlayDiff())
+	}
+}
+
+func TestModel_YKeyCopiesHashInMode3(t *testing.T) {
+	m := modelInMode3WithCommits()
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if cmd == nil {
+		t.Error("expected non-nil cmd for y key in mode 3")
+	}
+}
+
+func TestModel_YKeyNoOpInMode1(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if cmd != nil {
+		t.Errorf("expected nil cmd for y key in mode 1, got %T", cmd)
+	}
+}
+
+func TestModel_YKeyNoOpWithNoCommits(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if cmd != nil {
+		t.Errorf("expected nil cmd for y key with no commits, got %T", cmd)
+	}
+}
+
+func TestModel_DKeyNoOpInHistoryMode(t *testing.T) {
+	m := modelInMode3WithCommits()
+	m = enableDestructive(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if m.Overlay() != model.OverlayNone {
+		t.Errorf("expected OverlayNone in history mode, got %d", m.Overlay())
+	}
+}
+
+func TestModel_TKeyInHistoryFiresCmd(t *testing.T) {
+	m := modelInMode3WithCommits()
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	if cmd == nil {
+		t.Error("expected non-nil cmd for t key in history mode")
+	}
+}
+
+func TestModel_CKeyInHistoryFiresCmd(t *testing.T) {
+	m := modelInMode3WithCommits()
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	if cmd == nil {
+		t.Error("expected non-nil cmd for c key in history mode")
+	}
+}
+
 // --- Stash overlay ---
 
 func TestModel_EnterOpensOverlay(t *testing.T) {

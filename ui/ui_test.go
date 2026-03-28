@@ -732,3 +732,88 @@ func TestBranchPane_NonWorktreeBranchShowsNoLabel(t *testing.T) {
 		t.Error("non-worktree branch should not show [root]")
 	}
 }
+
+// --- History (mode 3) tests ---
+
+func TestModeHeader_ShowsThreeModes(t *testing.T) {
+	header := renderModeHeader(3, 60)
+	if !strings.Contains(header, "[3] history") {
+		t.Error("expected active '[3] history' in header")
+	}
+	if !strings.Contains(header, "1 branches") {
+		t.Error("expected inactive '1 branches' in header")
+	}
+	if !strings.Contains(header, "2 stashes") {
+		t.Error("expected inactive '2 stashes' in header")
+	}
+}
+
+func TestStatusBar_Mode3ShowsHistoryHints(t *testing.T) {
+	bar := RenderStatusBar(120, 3, 0, 1, false, false)
+	for _, hint := range []string{"enter: diff", "y: copy hash", "t: terminal", "c: code"} {
+		if !strings.Contains(bar, hint) {
+			t.Errorf("mode 3 status bar should contain %q", hint)
+		}
+	}
+}
+
+func TestStatusBar_Mode3OmitsDeleteHint(t *testing.T) {
+	bar := RenderStatusBar(120, 3, 0, 1, true, false)
+	if strings.Contains(bar, "d: delete") {
+		t.Error("mode 3 status bar should not contain 'd: delete'")
+	}
+	if strings.Contains(bar, "d: drop") {
+		t.Error("mode 3 status bar should not contain 'd: drop'")
+	}
+}
+
+func TestStatusBar_Mode3OmitsDestructiveHint(t *testing.T) {
+	bar := RenderStatusBar(120, 3, 0, 1, false, false)
+	if strings.Contains(bar, "D: destructive mode") {
+		t.Error("mode 3 status bar should not contain 'D: destructive mode'")
+	}
+}
+
+func TestCommitPane_ShowsCommitDetails(t *testing.T) {
+	commits := []gitquery.Commit{
+		{Hash: "abc1234", Author: "alice", Date: "2 hours ago", Subject: "Fix login bug"},
+		{Hash: "def5678", Author: "bob", Date: "3 days ago", Subject: "Add profile page"},
+	}
+	lines := renderCommitPane(commits, 0, 0, 80, 10)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "abc1234") {
+		t.Error("expected hash 'abc1234' in output")
+	}
+	if !strings.Contains(joined, "alice") {
+		t.Error("expected author 'alice' in output")
+	}
+	if !strings.Contains(joined, "2 hours ago") {
+		t.Error("expected date '2 hours ago' in output")
+	}
+	if !strings.Contains(joined, "Fix login bug") {
+		t.Error("expected subject 'Fix login bug' in output")
+	}
+}
+
+func TestCommitPane_ScrollsToSelectedCommit(t *testing.T) {
+	commits := make([]gitquery.Commit, 20)
+	for i := range commits {
+		commits[i] = gitquery.Commit{
+			Hash:    fmt.Sprintf("abc%04d", i),
+			Author:  "test",
+			Date:    "now",
+			Subject: fmt.Sprintf("commit-%d", i),
+		}
+	}
+	// Scroll past first 10, show 5 lines
+	lines := renderCommitPane(commits, 12, 10, 80, 5)
+	joined := strings.Join(lines, "\n")
+	// commit-10 should be visible (it's at offset 0 after scroll)
+	if !strings.Contains(joined, "commit-10") {
+		t.Error("expected 'commit-10' visible after scroll")
+	}
+	// commit-9 should not be visible (before scroll)
+	if strings.Contains(joined, "commit-9") {
+		t.Error("expected 'commit-9' not visible after scroll")
+	}
+}

@@ -63,7 +63,7 @@ func TestModel_ViewMode2ShowsPlaceholder(t *testing.T) {
 	}
 }
 
-func TestModel_ViewModeHeaderShowsTwoModes(t *testing.T) {
+func TestModel_ViewModeHeaderShowsThreeModes(t *testing.T) {
 	m := model.New(testRepos())
 	m, _ = update(m, tea.WindowSizeMsg{Width: 120, Height: 24})
 
@@ -75,6 +75,9 @@ func TestModel_ViewModeHeaderShowsTwoModes(t *testing.T) {
 	if !strings.Contains(view, "2 stashes") {
 		t.Error("mode 1 active: right pane header should show inactive '2 stashes'")
 	}
+	if !strings.Contains(view, "3 history") {
+		t.Error("mode 1 active: right pane header should show inactive '3 history'")
+	}
 
 	// Switch to mode 2
 	m = inRightPane(m)
@@ -85,6 +88,19 @@ func TestModel_ViewModeHeaderShowsTwoModes(t *testing.T) {
 	}
 	if !strings.Contains(view, "1 branches") {
 		t.Error("mode 2 active: right pane header should show inactive '1 branches'")
+	}
+
+	// Switch to mode 3
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRight})
+	view = m.View()
+	if !strings.Contains(view, "[3] history") {
+		t.Error("mode 3 active: right pane header should contain '[3] history'")
+	}
+	if !strings.Contains(view, "1 branches") {
+		t.Error("mode 3 active: right pane header should show inactive '1 branches'")
+	}
+	if !strings.Contains(view, "2 stashes") {
+		t.Error("mode 3 active: right pane header should show inactive '2 stashes'")
 	}
 }
 
@@ -204,6 +220,55 @@ func TestModel_ViewDestructiveModeShowsDeleteHint(t *testing.T) {
 	view := m.View()
 	if !strings.Contains(view, "d: delete") {
 		t.Error("destructive mode should show 'd: delete'")
+	}
+}
+
+func TestModel_ViewMode3ShowsPlaceholder(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+
+	view := m.View()
+	if !strings.Contains(view, "nothing here yet") {
+		t.Error("mode 3 with no commits should show placeholder")
+	}
+}
+
+func TestModel_ViewMode3ShowsCommitContent(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m, _ = update(m, model.CommitResultMsg{RepoPath: "/dev/alpha", Commits: testCommits()})
+
+	view := m.View()
+	if !strings.Contains(view, "Fix login bug") {
+		t.Error("view should contain commit subject 'Fix login bug'")
+	}
+	if !strings.Contains(view, "alice") {
+		t.Error("view should contain author 'alice'")
+	}
+}
+
+func TestModel_StatusBarMode3ShowsHistoryKeys(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+
+	view := m.View()
+	if !strings.Contains(view, "enter: diff") {
+		t.Error("mode 3 status bar should mention 'enter: diff'")
+	}
+	if !strings.Contains(view, "y: copy hash") {
+		t.Error("mode 3 status bar should mention 'y: copy hash'")
+	}
+	if !strings.Contains(view, "t: terminal") {
+		t.Error("mode 3 status bar should mention 't: terminal'")
+	}
+	if !strings.Contains(view, "c: code") {
+		t.Error("mode 3 status bar should mention 'c: code'")
 	}
 }
 

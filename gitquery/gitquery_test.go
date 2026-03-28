@@ -1,6 +1,7 @@
 package gitquery_test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -681,6 +682,136 @@ func TestFlattenBranches_NonStaleFlag(t *testing.T) {
 	rows := gitquery.FlattenBranches(branches)
 	if rows[0].Stale {
 		t.Error("expected Stale=false for non-stale worktree path")
+	}
+}
+
+// --- Commit tests ---
+
+func TestListCommits_ReturnsCommits(t *testing.T) {
+	dir := realPath(t, t.TempDir())
+	initRepo(t, dir)
+
+	writeFile(t, dir, "a.txt", "one")
+	run(t, dir, "git", "add", ".")
+	run(t, dir, "git", "commit", "-m", "second commit")
+
+	writeFile(t, dir, "b.txt", "two")
+	run(t, dir, "git", "add", ".")
+	run(t, dir, "git", "commit", "-m", "third commit")
+
+	commits, err := gitquery.ListCommits(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(commits) != 3 {
+		t.Fatalf("expected 3 commits, got %d", len(commits))
+	}
+	// Newest first
+	if commits[0].Subject != "third commit" {
+		t.Errorf("expected first commit subject %q, got %q", "third commit", commits[0].Subject)
+	}
+	if commits[0].Hash == "" {
+		t.Error("expected non-empty Hash")
+	}
+	if commits[0].Author != "Test" {
+		t.Errorf("expected Author %q, got %q", "Test", commits[0].Author)
+	}
+	if commits[0].Date == "" {
+		t.Error("expected non-empty Date")
+	}
+}
+
+func TestListCommits_Limit50(t *testing.T) {
+	dir := realPath(t, t.TempDir())
+	initRepo(t, dir)
+
+	for i := 0; i < 54; i++ {
+		writeFile(t, dir, "f.txt", fmt.Sprintf("v%d", i))
+		run(t, dir, "git", "add", ".")
+		run(t, dir, "git", "commit", "-m", fmt.Sprintf("commit %d", i))
+	}
+
+	commits, err := gitquery.ListCommits(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(commits) != 50 {
+		t.Fatalf("expected 50 commits, got %d", len(commits))
+	}
+}
+
+func TestListCommits_NewestFirst(t *testing.T) {
+	dir := realPath(t, t.TempDir())
+	initRepo(t, dir)
+
+	writeFile(t, dir, "a.txt", "one")
+	run(t, dir, "git", "add", ".")
+	run(t, dir, "git", "commit", "-m", "older")
+
+	writeFile(t, dir, "b.txt", "two")
+	run(t, dir, "git", "add", ".")
+	run(t, dir, "git", "commit", "-m", "newer")
+
+	commits, err := gitquery.ListCommits(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(commits) < 2 {
+		t.Fatal("expected at least 2 commits")
+	}
+	if commits[0].Subject != "newer" {
+		t.Errorf("expected newest commit first, got %q", commits[0].Subject)
+	}
+	if commits[1].Subject != "older" {
+		t.Errorf("expected older commit second, got %q", commits[1].Subject)
+	}
+}
+
+func TestListCommits_InvalidPath(t *testing.T) {
+	_, err := gitquery.ListCommits("/no/such/path")
+	if err == nil {
+		t.Fatal("expected error for invalid path, got nil")
+	}
+}
+
+func TestCommitDiff_ReturnsDiff(t *testing.T) {
+	dir := realPath(t, t.TempDir())
+	initRepo(t, dir)
+
+	writeFile(t, dir, "a.txt", "changed")
+	run(t, dir, "git", "add", ".")
+	run(t, dir, "git", "commit", "-m", "change a file")
+
+	commits, err := gitquery.ListCommits(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(commits) == 0 {
+		t.Fatal("expected at least one commit")
+	}
+
+	diff, err := gitquery.CommitDiff(dir, commits[0].Hash)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if diff == "" {
+		t.Fatal("expected non-empty diff")
+	}
+	if !strings.Contains(diff, "diff --git") {
+		t.Error("expected diff to contain 'diff --git'")
+	}
+	if !strings.Contains(diff, "change a file") {
+		t.Error("expected diff to contain commit message")
+	}
+}
+
+func TestCommitDiff_InvalidHash(t *testing.T) {
+	dir := realPath(t, t.TempDir())
+	initRepo(t, dir)
+
+	_, err := gitquery.CommitDiff(dir, "0000000000000000")
+	if err == nil {
+		t.Fatal("expected error for invalid hash, got nil")
 	}
 }
 
