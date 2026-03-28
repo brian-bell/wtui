@@ -328,8 +328,8 @@ func renderStashPane(stashes []gitquery.Stash, selected, scroll, width, height i
 	}
 
 	// Apply scroll offset
-	if scroll > len(content) {
-		scroll = len(content)
+	if scroll >= len(content) {
+		scroll = max(0, len(content)-1)
 	}
 	visible := content[scroll:]
 

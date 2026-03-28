@@ -2,6 +2,7 @@ package model_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -396,6 +397,34 @@ func TestModel_StashScrollFollowsCursorDown(t *testing.T) {
 	}
 	if m.StashSelected() != 7 {
 		t.Errorf("expected stashSelected=7, got %d", m.StashSelected())
+	}
+}
+
+func TestModel_StashScrollLongEntryFullyVisible(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: 12})
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+
+	// rightContentWidth = 80 - LeftPaneWidth(30) - 2 = 48; msgAvail = 48 - stashEntryOverhead(15) = 33
+	// 6 single-line stashes + 1 two-line stash (message > 33 runes)
+	stashes := make([]gitquery.Stash, 7)
+	for i := 0; i < 6; i++ {
+		stashes[i] = gitquery.Stash{Index: i, Date: "2026-03-01", Message: fmt.Sprintf("s%d", i)}
+	}
+	stashes[6] = gitquery.Stash{Index: 6, Date: "2026-03-01", Message: strings.Repeat("x", 40)}
+
+	m, _ = update(m, model.StashResultMsg{RepoPath: "/dev/alpha", Stashes: stashes})
+
+	// Navigate to the last stash (index 6)
+	for i := 0; i < 6; i++ {
+		m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+
+	// contentHeight=7, line=6 (6 single-line entries before), entryHeight=2
+	// line+entryHeight=8 > contentHeight=7 → scroll must be 8-7=1
+	if m.StashScroll() != 1 {
+		t.Errorf("expected stashScroll=1 to fully expose 2-line entry, got %d", m.StashScroll())
 	}
 }
 
