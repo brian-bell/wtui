@@ -681,6 +681,9 @@ func (m Model) ensureStashVisible() Model {
 	for i := 0; i < m.stashSelected && i < len(m.stashes); i++ {
 		line += ui.StashEntryHeight(m.stashes[i].Message, rightContentWidth)
 	}
+	if len(m.stashes) == 0 || m.stashSelected >= len(m.stashes) {
+		return m
+	}
 	entryHeight := ui.StashEntryHeight(m.stashes[m.stashSelected].Message, rightContentWidth)
 	if m.stashScroll > line {
 		m.stashScroll = line
