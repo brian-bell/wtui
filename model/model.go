@@ -90,6 +90,7 @@ type Model struct {
 	confirmAction  func() tea.Cmd
 	confirmForce   bool
 	branchScroll   int
+	stashScroll    int
 	activePane     int // 0=left (repos), 1=right (content)
 	destructive    bool
 }
@@ -113,6 +114,7 @@ func (m Model) OverlayScroll() int         { return m.overlayScroll }
 func (m Model) ConfirmPrompt() string      { return m.confirmPrompt }
 func (m Model) ConfirmForce() bool         { return m.confirmForce }
 func (m Model) BranchScroll() int          { return m.branchScroll }
+func (m Model) StashScroll() int           { return m.stashScroll }
 func (m Model) ActivePane() int            { return m.activePane }
 func (m Model) Destructive() bool          { return m.destructive }
 
@@ -137,6 +139,7 @@ func (m Model) View() string {
 		ConfirmPrompt:  m.confirmPrompt,
 		ConfirmForce:   m.confirmForce,
 		BranchScroll:   m.branchScroll,
+		StashScroll:    m.stashScroll,
 		ActivePane:     m.activePane,
 		Destructive:    m.destructive,
 	})
@@ -322,6 +325,7 @@ func (m Model) handleCursorUp() (tea.Model, tea.Cmd) {
 		} else {
 			m.stashSelected = len(m.stashes) - 1
 		}
+		m = m.ensureStashVisible()
 	}
 	return m, nil
 }
@@ -342,6 +346,7 @@ func (m Model) handleCursorDown() (tea.Model, tea.Cmd) {
 		} else {
 			m.stashSelected = 0
 		}
+		m = m.ensureStashVisible()
 	}
 	return m, nil
 }
@@ -464,6 +469,7 @@ func (m Model) resetRightPaneCursors() Model {
 	m.branchSelected = 0
 	m.stashSelected = 0
 	m.branchScroll = 0
+	m.stashScroll = 0
 	m.rows = nil
 	m.stashes = nil
 	return m
@@ -661,6 +667,25 @@ func (m Model) ensureBranchVisible() Model {
 	}
 	if line >= m.branchScroll+contentHeight {
 		m.branchScroll = line - contentHeight + 1
+	}
+	return m
+}
+
+func (m Model) ensureStashVisible() Model {
+	contentHeight := m.height - ui.BranchContentOverhead
+	if contentHeight <= 0 {
+		contentHeight = 16
+	}
+	rightContentWidth := m.width - ui.LeftPaneWidth - 2
+	line := 0
+	for i := 0; i < m.stashSelected && i < len(m.stashes); i++ {
+		line += ui.StashEntryHeight(m.stashes[i].Message, rightContentWidth)
+	}
+	if m.stashScroll > line {
+		m.stashScroll = line
+	}
+	if line >= m.stashScroll+contentHeight {
+		m.stashScroll = line - contentHeight + 1
 	}
 	return m
 }

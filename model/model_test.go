@@ -373,6 +373,57 @@ func TestModel_BranchScrollFollowsCursor(t *testing.T) {
 	}
 }
 
+func TestModel_StashScrollFollowsCursorDown(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: 12})
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+
+	stashes := make([]gitquery.Stash, 20)
+	for i := range stashes {
+		stashes[i] = gitquery.Stash{Index: i, Date: "2026-03-01", Message: fmt.Sprintf("stash %d", i)}
+	}
+	m, _ = update(m, model.StashResultMsg{RepoPath: "/dev/alpha", Stashes: stashes})
+
+	// contentHeight = 12 - 5 = 7; each short stash = 1 line
+	// Navigate down 7 times to move past viewport
+	for i := 0; i < 7; i++ {
+		m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+
+	if m.StashScroll() == 0 {
+		t.Error("expected stashScroll > 0 after navigating past viewport")
+	}
+	if m.StashSelected() != 7 {
+		t.Errorf("expected stashSelected=7, got %d", m.StashSelected())
+	}
+}
+
+func TestModel_StashScrollResetOnRepoSwitch(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: 12})
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+
+	stashes := make([]gitquery.Stash, 20)
+	for i := range stashes {
+		stashes[i] = gitquery.Stash{Index: i, Date: "2026-03-01", Message: fmt.Sprintf("s%d", i)}
+	}
+	m, _ = update(m, model.StashResultMsg{RepoPath: "/dev/alpha", Stashes: stashes})
+
+	for i := 0; i < 10; i++ {
+		m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+
+	// Switch to left pane and navigate to another repo
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+
+	if m.StashScroll() != 0 {
+		t.Errorf("expected stashScroll=0 after repo switch, got %d", m.StashScroll())
+	}
+}
+
 // --- Mode switching ---
 
 func TestModel_ModeSwitchOnKeyPress(t *testing.T) {

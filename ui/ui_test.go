@@ -604,3 +604,36 @@ func TestBranchPane_NonWorktreeBranchShowsNoLabel(t *testing.T) {
 		t.Error("non-worktree branch should not show [root]")
 	}
 }
+
+func TestStashEntryHeight_ShortMessage(t *testing.T) {
+	h := StashEntryHeight("short msg", 48)
+	if h != 1 {
+		t.Errorf("expected height 1 for short message, got %d", h)
+	}
+}
+
+func TestStashEntryHeight_LongMessage(t *testing.T) {
+	longMsg := strings.Repeat("a", 100)
+	h := StashEntryHeight(longMsg, 48)
+	if h != 2 {
+		t.Errorf("expected height 2 for long message, got %d", h)
+	}
+}
+
+func TestStashEntryHeight_ExactFit(t *testing.T) {
+	// overhead = 15, so for width=48, msgAvail=33
+	msg := strings.Repeat("a", 33)
+	h := StashEntryHeight(msg, 48)
+	if h != 1 {
+		t.Errorf("expected height 1 for exact-fit message, got %d", h)
+	}
+}
+
+func TestStashEntryHeight_OneOverFit(t *testing.T) {
+	// overhead = 15, so for width=48, msgAvail=33
+	msg := strings.Repeat("a", 34)
+	h := StashEntryHeight(msg, 48)
+	if h != 2 {
+		t.Errorf("expected height 2 for one-over message, got %d", h)
+	}
+}

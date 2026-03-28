@@ -18,6 +18,20 @@ const LeftPaneWidth = 30
 // this constant so they stay in sync.
 const BranchContentOverhead = 5
 
+// stashEntryOverhead is the number of visible chars consumed by the prefix,
+// date, and separator in a stash line: "   " (3) + date (10) + "  " (2).
+const stashEntryOverhead = 15
+
+// StashEntryHeight returns the number of visual lines a stash entry will
+// occupy given its message and the pane width. Returns 1 or 2.
+func StashEntryHeight(msg string, paneWidth int) int {
+	msgAvail := paneWidth - stashEntryOverhead
+	if msgAvail < 1 || len([]rune(msg)) <= msgAvail {
+		return 1
+	}
+	return 2
+}
+
 var (
 	repoStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 	selectedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true).Reverse(true)
@@ -57,6 +71,7 @@ type RenderParams struct {
 	ConfirmPrompt  string
 	ConfirmForce   bool
 	BranchScroll   int
+	StashScroll    int
 	ActivePane     int
 	Destructive    bool
 }
@@ -131,7 +146,7 @@ func Render(p RenderParams) string {
 	case p.Mode == 1 && len(p.Branches) > 0:
 		rightLines = renderBranchPaneSelected(p.Branches, branchSel, p.BranchScroll, rightContentWidth, rightContentHeight, repoPath)
 	case p.Mode == 2 && len(p.Stashes) > 0:
-		rightLines = renderStashPane(p.Stashes, stashSel, rightContentWidth, rightContentHeight)
+		rightLines = renderStashPane(p.Stashes, stashSel, p.StashScroll, rightContentWidth, rightContentHeight)
 	default:
 		rightLines = renderPlaceholderPane(rightContentWidth, rightContentHeight)
 	}
@@ -305,29 +320,97 @@ func renderBranchPaneSelected(rows []gitquery.BranchRow, selected, scroll, width
 	return lines
 }
 
-func renderStashPane(stashes []gitquery.Stash, selected, width, height int) []string {
+func renderStashPane(stashes []gitquery.Stash, selected, scroll, width, height int) []string {
 	var content []string
 
 	for i, s := range stashes {
-		date := s.Date
-		if len(date) > 10 {
-			date = date[:10]
-		}
-
-		dateStr := stashDateStyle.Render(date)
-		msgStr := stashMsgStyle.Render(s.Message)
-		line := fmt.Sprintf("   %s  %s", dateStr, msgStr)
-
-		if i == selected {
-			line = stashSelStyle.Width(width).Render(fmt.Sprintf(" > %s  %s", date, s.Message))
-		}
-
-		content = append(content, truncateToWidth(line, width))
+		content = append(content, stashEntryLines(s, i, selected, width)...)
 	}
 
+	// Apply scroll offset
+	if scroll > len(content) {
+		scroll = len(content)
+	}
+	visible := content[scroll:]
+
 	lines := make([]string, height)
-	copy(lines, content)
+	copy(lines, visible)
 	return lines
+}
+
+// stashEntryLines renders a single stash entry as 1-2 visual lines.
+// Long messages wrap to a second line, capped at 2 lines total.
+func stashEntryLines(s gitquery.Stash, index, selected, width int) []string {
+	date := s.Date
+	if len(date) > 10 {
+		date = date[:10]
+	}
+
+	msgRunes := []rune(s.Message)
+	msgAvail := width - stashEntryOverhead
+	if msgAvail < 1 {
+		msgAvail = 1
+	}
+
+	if index == selected {
+		return stashEntrySelected(date, msgRunes, msgAvail, width)
+	}
+	return stashEntryNormal(date, msgRunes, msgAvail, width)
+}
+
+func stashEntrySelected(date string, msgRunes []rune, msgAvail, width int) []string {
+	if len(msgRunes) <= msgAvail {
+		raw := fmt.Sprintf(" > %s  %s", date, string(msgRunes))
+		pad := width - lipgloss.Width(raw)
+		if pad > 0 {
+			raw += strings.Repeat(" ", pad)
+		}
+		return []string{stashSelStyle.Render(raw)}
+	}
+
+	// Two lines
+	line1Msg := string(msgRunes[:msgAvail])
+	line2Runes := msgRunes[msgAvail:]
+	indent := strings.Repeat(" ", stashEntryOverhead)
+	line2Avail := width - stashEntryOverhead
+	if len(line2Runes) > line2Avail {
+		line2Runes = line2Runes[:line2Avail]
+	}
+
+	raw1 := fmt.Sprintf(" > %s  %s", date, line1Msg)
+	raw2 := indent + string(line2Runes)
+	pad1 := width - lipgloss.Width(raw1)
+	if pad1 > 0 {
+		raw1 += strings.Repeat(" ", pad1)
+	}
+	pad2 := width - lipgloss.Width(raw2)
+	if pad2 > 0 {
+		raw2 += strings.Repeat(" ", pad2)
+	}
+	return []string{stashSelStyle.Render(raw1), stashSelStyle.Render(raw2)}
+}
+
+func stashEntryNormal(date string, msgRunes []rune, msgAvail, width int) []string {
+	dateStr := stashDateStyle.Render(date)
+
+	if len(msgRunes) <= msgAvail {
+		msgStr := stashMsgStyle.Render(string(msgRunes))
+		line := fmt.Sprintf("   %s  %s", dateStr, msgStr)
+		return []string{truncateToWidth(line, width)}
+	}
+
+	// Two lines
+	line1Msg := string(msgRunes[:msgAvail])
+	line2Runes := msgRunes[msgAvail:]
+	indent := strings.Repeat(" ", stashEntryOverhead)
+	line2Avail := width - stashEntryOverhead
+	if len(line2Runes) > line2Avail {
+		line2Runes = line2Runes[:line2Avail]
+	}
+
+	line1 := fmt.Sprintf("   %s  %s", dateStr, stashMsgStyle.Render(line1Msg))
+	line2 := indent + stashMsgStyle.Render(string(line2Runes))
+	return []string{truncateToWidth(line1, width), truncateToWidth(line2, width)}
 }
 
 func renderOverlay(p RenderParams) string {

@@ -1,6 +1,7 @@
 package model_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -215,5 +216,53 @@ func TestModel_ViewDestructiveModeHidesDestructiveHint(t *testing.T) {
 	view := m.View()
 	if strings.Contains(view, "D: destructive mode") {
 		t.Error("destructive mode should NOT show 'D: destructive mode' hint")
+	}
+}
+
+// --- Stash scroll/truncation view tests ---
+
+func TestModel_ViewStashLongMessageFixedHeight(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+
+	longMsg := strings.Repeat("x", 200)
+	stashes := []gitquery.Stash{
+		{Index: 0, Date: "2026-03-18 10:00:00 -0700", Message: longMsg},
+		{Index: 1, Date: "2026-03-17 10:00:00 -0700", Message: "short"},
+	}
+	m, _ = update(m, model.StashResultMsg{RepoPath: "/dev/alpha", Stashes: stashes})
+
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) != m.Height() {
+		t.Errorf("expected %d view lines, got %d (long message should not grow pane)", m.Height(), len(lines))
+	}
+}
+
+func TestModel_ViewStashScrollHidesTopEntries(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: 12})
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+
+	stashes := make([]gitquery.Stash, 20)
+	for i := range stashes {
+		stashes[i] = gitquery.Stash{Index: i, Date: "2026-03-01", Message: fmt.Sprintf("stash-item-%d", i)}
+	}
+	m, _ = update(m, model.StashResultMsg{RepoPath: "/dev/alpha", Stashes: stashes})
+
+	// Navigate down past viewport
+	for i := 0; i < 10; i++ {
+		m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+
+	view := m.View()
+	if strings.Contains(view, "stash-item-0") {
+		t.Error("stash-item-0 should be scrolled out of view")
+	}
+	if !strings.Contains(view, "stash-item-10") {
+		t.Error("stash-item-10 should be visible at cursor position")
 	}
 }
