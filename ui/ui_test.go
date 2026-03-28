@@ -190,6 +190,61 @@ func TestRepoList_TruncatesLongNames(t *testing.T) {
 	}
 }
 
+func TestStashPane_LongMessageAlwaysShowsTwoLines(t *testing.T) {
+	width := 50
+	longMsg := "this is a very long stash message that should wrap to a second line always"
+	stashes := []gitquery.Stash{
+		{Index: 0, Date: "2026-03-18 10:00:00", Message: longMsg},
+	}
+	// Not selected (selected=-1): should still show 2 lines for the long message
+	lines := renderStashPane(stashes, -1, 0, width, 10)
+	// Count non-empty lines
+	nonEmpty := 0
+	for _, l := range lines {
+		if strings.TrimSpace(l) != "" {
+			nonEmpty++
+		}
+	}
+	if nonEmpty < 2 {
+		t.Errorf("expected at least 2 non-empty lines for long stash message, got %d", nonEmpty)
+	}
+}
+
+func TestStashPane_ShortMessageShowsOneLine(t *testing.T) {
+	width := 50
+	stashes := []gitquery.Stash{
+		{Index: 0, Date: "2026-03-18 10:00:00", Message: "short"},
+	}
+	lines := renderStashPane(stashes, -1, 0, width, 10)
+	nonEmpty := 0
+	for _, l := range lines {
+		if strings.TrimSpace(l) != "" {
+			nonEmpty++
+		}
+	}
+	if nonEmpty != 1 {
+		t.Errorf("expected 1 non-empty line for short stash message, got %d", nonEmpty)
+	}
+}
+
+func TestStashPane_ScrollOffset(t *testing.T) {
+	width := 50
+	stashes := []gitquery.Stash{
+		{Index: 0, Date: "2026-03-18", Message: "first"},
+		{Index: 1, Date: "2026-03-17", Message: "second"},
+		{Index: 2, Date: "2026-03-16", Message: "third"},
+	}
+	// scroll=1 should skip the first stash line
+	lines := renderStashPane(stashes, 1, 1, width, 3)
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "first") {
+		t.Error("'first' should be scrolled off the top")
+	}
+	if !strings.Contains(joined, "second") {
+		t.Error("'second' should be visible")
+	}
+}
+
 func TestBranchPane_CleanBranchShowsGreenCheck(t *testing.T) {
 	rows := []gitquery.BranchRow{
 		{Branch: gitquery.Branch{Name: "main", HasUpstream: true, Ahead: 0, Behind: 0, Dirty: false}},

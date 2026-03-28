@@ -22,6 +22,10 @@ const RepoContentOverhead = 3
 // this constant so they stay in sync.
 const BranchContentOverhead = 5
 
+// StashPrefixWidth is the visible width consumed by the stash line prefix:
+// indent/cursor (3) + date (10) + separator (2).
+const StashPrefixWidth = 15
+
 var (
 	repoStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 	selectedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true).Reverse(true)
@@ -62,6 +66,7 @@ type RenderParams struct {
 	ConfirmForce   bool
 	BranchScroll   int
 	RepoScroll     int
+	StashScroll    int
 	ActivePane     int
 	Destructive    bool
 }
@@ -136,7 +141,7 @@ func Render(p RenderParams) string {
 	case p.Mode == 1 && len(p.Branches) > 0:
 		rightLines = renderBranchPaneSelected(p.Branches, branchSel, p.BranchScroll, rightContentWidth, rightContentHeight, repoPath)
 	case p.Mode == 2 && len(p.Stashes) > 0:
-		rightLines = renderStashPane(p.Stashes, stashSel, rightContentWidth, rightContentHeight)
+		rightLines = renderStashPane(p.Stashes, stashSel, p.StashScroll, rightContentWidth, rightContentHeight)
 	default:
 		rightLines = renderPlaceholderPane(rightContentWidth, rightContentHeight)
 	}
@@ -305,8 +310,40 @@ func renderBranchPaneSelected(rows []gitquery.BranchRow, selected, scroll, width
 	return lines
 }
 
-func renderStashPane(stashes []gitquery.Stash, selected, width, height int) []string {
+// StashLineCount returns the number of visual lines a stash entry occupies
+// at the given pane width (1 or 2).
+func StashLineCount(msg string, paneWidth int) int {
+	if lipgloss.Width(msg) > paneWidth-StashPrefixWidth {
+		return 2
+	}
+	return 1
+}
+
+// splitAtWidth splits s into two parts where the first fits within maxWidth
+// visible columns.
+func splitAtWidth(s string, maxWidth int) (string, string) {
+	if maxWidth <= 0 {
+		return "", s
+	}
+	if lipgloss.Width(s) <= maxWidth {
+		return s, ""
+	}
+	runes := []rune(s)
+	for i := 1; i <= len(runes); i++ {
+		if lipgloss.Width(string(runes[:i])) > maxWidth {
+			return string(runes[:i-1]), string(runes[i-1:])
+		}
+	}
+	return s, ""
+}
+
+func renderStashPane(stashes []gitquery.Stash, selected, scroll, width, height int) []string {
 	var content []string
+	msgWidth := width - StashPrefixWidth
+	if msgWidth < 1 {
+		msgWidth = 1
+	}
+	contIndent := strings.Repeat(" ", StashPrefixWidth)
 
 	for i, s := range stashes {
 		date := s.Date
@@ -314,19 +351,31 @@ func renderStashPane(stashes []gitquery.Stash, selected, width, height int) []st
 			date = date[:10]
 		}
 
-		dateStr := stashDateStyle.Render(date)
-		msgStr := stashMsgStyle.Render(s.Message)
-		line := fmt.Sprintf("   %s  %s", dateStr, msgStr)
+		msgFirst, msgRest := splitAtWidth(s.Message, msgWidth)
 
 		if i == selected {
-			line = stashSelStyle.Width(width).Render(fmt.Sprintf(" > %s  %s", date, s.Message))
+			line := truncateToWidth(fmt.Sprintf(" > %s  %s", date, msgFirst), width)
+			content = append(content, stashSelStyle.Width(width).Render(line))
+		} else {
+			dateStr := stashDateStyle.Render(date)
+			msgStr := stashMsgStyle.Render(msgFirst)
+			content = append(content, truncateToWidth(fmt.Sprintf("   %s  %s", dateStr, msgStr), width))
 		}
 
-		content = append(content, truncateToWidth(line, width))
+		if msgRest != "" {
+			contLine := truncateToWidth(contIndent+stashMsgStyle.Render(msgRest), width)
+			content = append(content, contLine)
+		}
 	}
 
+	// Apply scroll offset
+	if scroll > len(content) {
+		scroll = len(content)
+	}
+	visible := content[scroll:]
+
 	lines := make([]string, height)
-	copy(lines, content)
+	copy(lines, visible)
 	return lines
 }
 

@@ -459,6 +459,75 @@ func TestModel_RepoScrollWrapsFromBottomToTop(t *testing.T) {
 	}
 }
 
+func TestModel_StashScrollFollowsCursor(t *testing.T) {
+	// Create 10 stashes, terminal height only shows 3 content lines
+	stashes := make([]gitquery.Stash, 10)
+	for i := range stashes {
+		stashes[i] = gitquery.Stash{Index: i, Date: "2026-03-18", Message: fmt.Sprintf("stash-%d", i)}
+	}
+	contentHeight := 3
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: ui.BranchContentOverhead + contentHeight})
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m, _ = update(m, model.StashResultMsg{RepoPath: "/dev/alpha", Stashes: stashes})
+
+	if m.StashScroll() != 0 {
+		t.Errorf("expected scroll 0 at start, got %d", m.StashScroll())
+	}
+
+	// Move cursor down past the viewport
+	for i := 0; i < 9; i++ {
+		m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	if m.StashSelected() != 9 {
+		t.Errorf("expected cursor at 9, got %d", m.StashSelected())
+	}
+	if m.StashScroll() == 0 {
+		t.Error("expected scroll to advance when cursor moves past viewport")
+	}
+	// Cursor must be within visible viewport
+	if m.StashSelected() < m.StashScroll() || m.StashSelected() >= m.StashScroll()+contentHeight {
+		t.Errorf("cursor %d not in scroll viewport [%d, %d)", m.StashSelected(), m.StashScroll(), m.StashScroll()+contentHeight)
+	}
+
+	// Move back up to 0
+	for i := 0; i < 9; i++ {
+		m, _ = update(m, tea.KeyMsg{Type: tea.KeyUp})
+	}
+	if m.StashScroll() != 0 {
+		t.Errorf("expected scroll back to 0, got %d", m.StashScroll())
+	}
+}
+
+func TestModel_StashScrollAccountsForLongMessages(t *testing.T) {
+	// Stashes with long messages take 2 lines each
+	longMsg := "this is a very long stash message that will definitely wrap to two lines in a narrow pane"
+	stashes := make([]gitquery.Stash, 5)
+	for i := range stashes {
+		stashes[i] = gitquery.Stash{Index: i, Date: "2026-03-18", Message: longMsg}
+	}
+	// Width 50: prefix is 15 chars, message gets 35 chars, longMsg overflows → 2 lines each
+	// 3 content lines → only ~1.5 stashes visible at a time
+	contentHeight := 3
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 50 + ui.LeftPaneWidth + 2, Height: ui.BranchContentOverhead + contentHeight})
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m, _ = update(m, model.StashResultMsg{RepoPath: "/dev/alpha", Stashes: stashes})
+
+	// Move to stash 2 (each takes 2 lines, so stash 2 starts at visual line 4)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.StashSelected() != 2 {
+		t.Errorf("expected cursor at 2, got %d", m.StashSelected())
+	}
+	// Scroll should have advanced since stash 2 starts at line 4, viewport is only 3 lines
+	if m.StashScroll() == 0 {
+		t.Error("expected scroll to advance for long-message stashes")
+	}
+}
+
 // --- Mode switching ---
 
 func TestModel_ModeSwitchOnKeyPress(t *testing.T) {
