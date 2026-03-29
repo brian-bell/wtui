@@ -1074,6 +1074,35 @@ func TestReflogPane_SelectedHighlighted(t *testing.T) {
 	}
 }
 
+func TestReflogDiffOverlay_EmptyDiffShowsMessage(t *testing.T) {
+	view := Render(RenderParams{
+		Width:   80,
+		Height:  24,
+		Mode:    5,
+		Overlay: 6, // OverlayReflogDiff
+		// OverlayDiff is empty
+	})
+	if !strings.Contains(view, "No changes at this reflog entry") {
+		t.Error("expected 'No changes at this reflog entry' in empty reflog diff overlay")
+	}
+}
+
+func TestReflogDiffOverlay_NonEmptyDiffShowsContent(t *testing.T) {
+	view := Render(RenderParams{
+		Width:       80,
+		Height:      24,
+		Mode:        5,
+		Overlay:     6, // OverlayReflogDiff
+		OverlayDiff: "diff --git a/f.txt\n+added line",
+	})
+	if !strings.Contains(view, "diff --git") {
+		t.Error("expected diff content in reflog diff overlay")
+	}
+	if strings.Contains(view, "No changes") {
+		t.Error("should not show 'No changes' when diff has content")
+	}
+}
+
 func TestStatusBar_ReflogModeHints(t *testing.T) {
 	bar := RenderStatusBar(120, 5, 0, 1, false, false, false)
 	for _, hint := range []string{"enter: diff", "y: copy hash", "tab: pane", "q/esc: quit"} {

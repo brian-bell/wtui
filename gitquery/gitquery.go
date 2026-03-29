@@ -217,6 +217,20 @@ func ListReflog(repoPath string) ([]ReflogEntry, error) {
 	return entries, nil
 }
 
+// ReflogDiff returns the diff for a reflog entry by running git diff <hash>^ <hash>.
+// Falls back to git show <hash> for root commits where <hash>^ doesn't exist.
+func ReflogDiff(repoPath string, hash string) (string, error) {
+	out, err := gitCmd(repoPath, "diff", hash+"^", hash)
+	if err != nil {
+		// Root commit has no parent — fall back to git show
+		out, err = gitCmd(repoPath, "show", hash)
+		if err != nil {
+			return "", fmt.Errorf("reflog diff for %s: %w", hash, err)
+		}
+	}
+	return out, nil
+}
+
 // CommitDiff returns the full git show output for a specific commit.
 func CommitDiff(repoPath string, hash string) (string, error) {
 	out, err := gitCmd(repoPath, "show", hash)

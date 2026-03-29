@@ -511,6 +511,16 @@ func renderOverlay(p RenderParams) string {
 	var diffLines []string
 	if p.OverlayDiff != "" {
 		diffLines = strings.Split(p.OverlayDiff, "\n")
+	} else if p.Overlay == 6 { // OverlayReflogDiff with empty diff
+		lines := make([]string, contentHeight)
+		msg := placeholderStyle.Render("No changes at this reflog entry")
+		mid := contentHeight / 2
+		pad := (p.Width - lipgloss.Width(msg)) / 2
+		if pad < 0 {
+			pad = 0
+		}
+		lines[mid] = strings.Repeat(" ", pad) + msg
+		return strings.Join(lines, "\n") + "\n" + statusBar
 	}
 
 	// Apply scroll offset

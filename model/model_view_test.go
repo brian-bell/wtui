@@ -507,6 +507,43 @@ func TestModel_ViewReflogModeShowsReflogContent(t *testing.T) {
 	}
 }
 
+func TestModel_ViewReflogDiffOverlayShowsEmptyMessage(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	m, _ = update(m, model.ReflogResultMsg{
+		RepoPath: "/dev/alpha",
+		Reflogs:  testReflogs(),
+	})
+	// Open overlay and receive empty diff (e.g. checkout entry)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m, _ = update(m, model.ReflogDiffResultMsg{RepoPath: "/dev/alpha", Hash: "abc1234", Diff: ""})
+
+	view := m.View()
+	if !strings.Contains(view, "No changes at this reflog entry") {
+		t.Error("reflog diff overlay with empty diff should show 'No changes at this reflog entry'")
+	}
+}
+
+func TestModel_ViewReflogDiffOverlayShowsDiff(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	m, _ = update(m, model.ReflogResultMsg{
+		RepoPath: "/dev/alpha",
+		Reflogs:  testReflogs(),
+	})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m, _ = update(m, model.ReflogDiffResultMsg{RepoPath: "/dev/alpha", Hash: "abc1234", Diff: "diff --git a/f.txt\n+added line"})
+
+	view := m.View()
+	if !strings.Contains(view, "diff --git") {
+		t.Error("reflog diff overlay should show diff content")
+	}
+}
+
 func TestModel_ViewReflogModeShowsPlaceholder(t *testing.T) {
 	m := model.New(testRepos())
 	m, _ = update(m, tea.WindowSizeMsg{Width: 120, Height: 24})
