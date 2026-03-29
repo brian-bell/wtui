@@ -218,20 +218,21 @@ func renderModeHeader(mode, width int) string {
 // RenderStatusBar produces the bottom status bar (hints only, no mode tabs).
 func RenderStatusBar(width, mode, overlay, activePane int, destructive, staleSelected, dirtySelected bool) string {
 	var hints string
-	if overlay == 3 {
+	switch {
+	case overlay == 3:
 		hints = "  y: confirm  n/esc: cancel"
-	} else if overlay != 0 {
+	case overlay != 0:
 		hints = "  ↑/↓ scroll  esc: close"
-	} else if mode == 4 {
+	case mode == 4:
 		hints = "  tab: pane  q/esc: quit  ↑/↓ select  enter: diff  y: copy hash  t: terminal  c: code"
-	} else if mode == 3 {
+	case mode == 3:
 		hints = "  tab: pane  q/esc: quit  ↑/↓ select  enter: diff"
 		if destructive {
 			hints += "  " + dirtyRedStyle.Render("d: drop")
 		} else {
 			hints += "  D: destructive mode"
 		}
-	} else if mode == 2 {
+	case mode == 2:
 		keys := "  |  tab: pane  q/esc: quit"
 		if activePane == 1 {
 			keys += "  t: terminal  c: code"
@@ -243,7 +244,7 @@ func RenderStatusBar(width, mode, overlay, activePane int, destructive, staleSel
 			keys += "  D: destructive mode"
 		}
 		hints = " " + cleanStyle.Render("✔") + " clean  " + aheadBehindStyle.Render("●") + " ahead/behind  " + dirtyRedStyle.Render("●") + " dirty  " + noUpstreamStyle.Render("●") + " no upstream" + keys
-	} else if mode == 1 {
+	case mode == 1:
 		hints = "  tab: pane  q/esc: quit  ↑/↓ select"
 		if activePane == 1 && !staleSelected {
 			if dirtySelected {
@@ -260,7 +261,7 @@ func RenderStatusBar(width, mode, overlay, activePane int, destructive, staleSel
 		if !destructive {
 			hints += "  D: destructive mode"
 		}
-	} else {
+	default:
 		hints = "  tab: pane  q/esc: quit  ↑/↓ select"
 	}
 
@@ -306,10 +307,7 @@ func renderBranchPaneSelected(rows []gitquery.BranchRow, selected, scroll, width
 			indicators += fmt.Sprintf(" +%d/-%d", b.Ahead, b.Behind)
 		}
 		if b.Dirty {
-			indicators += dirtyRedStyle.Render(" ●")
-			indicators += fmt.Sprintf(" %d files ", b.FilesChanged)
-			indicators += diffAddStyle.Render(fmt.Sprintf("+%d", b.LinesAdded))
-			indicators += "/" + diffDelStyle.Render(fmt.Sprintf("-%d", b.LinesDeleted))
+			indicators += renderDirtyIndicator(b.FilesChanged, b.LinesAdded, b.LinesDeleted)
 		}
 		if !b.HasUpstream || b.UpstreamGone {
 			indicators += noUpstreamStyle.Render(" ●")
@@ -347,20 +345,8 @@ func renderBranchPaneSelected(rows []gitquery.BranchRow, selected, scroll, width
 		}
 	}
 
-	// Truncate lines to pane width
-	for i, line := range content {
-		content[i] = truncateToWidth(line, width)
-	}
-
-	// Apply scroll offset
-	if scroll > len(content) {
-		scroll = len(content)
-	}
-	visible := content[scroll:]
-
-	lines := make([]string, height)
-	copy(lines, visible)
-	return lines
+	truncateLines(content, width)
+	return scrollAndPad(content, scroll, height)
 }
 
 // StashLineCount returns the number of visual lines a stash entry occupies
@@ -426,15 +412,7 @@ func renderStashPane(stashes []gitquery.Stash, selected, scroll, width, height i
 		}
 	}
 
-	// Apply scroll offset
-	if scroll > len(content) {
-		scroll = len(content)
-	}
-	visible := content[scroll:]
-
-	lines := make([]string, height)
-	copy(lines, visible)
-	return lines
+	return scrollAndPad(content, scroll, height)
 }
 
 func renderCommitPane(commits []gitquery.Commit, selected, scroll, width, height int) []string {
@@ -453,15 +431,7 @@ func renderCommitPane(commits []gitquery.Commit, selected, scroll, width, height
 		content = append(content, truncateToWidth(line, width))
 	}
 
-	// Apply scroll offset
-	if scroll > len(content) {
-		scroll = len(content)
-	}
-	visible := content[scroll:]
-
-	lines := make([]string, height)
-	copy(lines, visible)
-	return lines
+	return scrollAndPad(content, scroll, height)
 }
 
 func renderWorktreePane(worktrees []gitquery.Worktree, selected, scroll, width, height int) []string {
@@ -476,10 +446,7 @@ func renderWorktreePane(worktrees []gitquery.Worktree, selected, scroll, width, 
 		if wt.Stale {
 			indicators = dirtyRedStyle.Render(" ✗") + " " + dirtyRedStyle.Render("stale")
 		} else if wt.Dirty {
-			indicators = dirtyRedStyle.Render(" ●")
-			indicators += fmt.Sprintf(" %d files ", wt.FilesChanged)
-			indicators += diffAddStyle.Render(fmt.Sprintf("+%d", wt.LinesAdded))
-			indicators += "/" + diffDelStyle.Render(fmt.Sprintf("-%d", wt.LinesDeleted))
+			indicators = renderDirtyIndicator(wt.FilesChanged, wt.LinesAdded, wt.LinesDeleted)
 		} else {
 			indicators = cleanStyle.Render(" ✔")
 		}
@@ -498,20 +465,8 @@ func renderWorktreePane(worktrees []gitquery.Worktree, selected, scroll, width, 
 		content = append(content, line)
 	}
 
-	// Truncate lines to pane width
-	for i, line := range content {
-		content[i] = truncateToWidth(line, width)
-	}
-
-	// Apply scroll offset
-	if scroll > len(content) {
-		scroll = len(content)
-	}
-	visible := content[scroll:]
-
-	lines := make([]string, height)
-	copy(lines, visible)
-	return lines
+	truncateLines(content, width)
+	return scrollAndPad(content, scroll, height)
 }
 
 func renderOverlay(p RenderParams) string {
@@ -586,6 +541,35 @@ func truncateToWidth(s string, maxWidth int) string {
 		runes = runes[:len(runes)-1]
 	}
 	return string(runes)
+}
+
+// scrollAndPad applies a scroll offset to content and returns a zero-padded
+// slice of exactly height lines.
+func scrollAndPad(content []string, scroll, height int) []string {
+	if scroll > len(content) {
+		scroll = len(content)
+	}
+	visible := content[scroll:]
+	lines := make([]string, height)
+	copy(lines, visible)
+	return lines
+}
+
+// truncateLines truncates every line in place to fit within maxWidth visible columns.
+func truncateLines(lines []string, width int) {
+	for i, line := range lines {
+		lines[i] = truncateToWidth(line, width)
+	}
+}
+
+// renderDirtyIndicator returns the styled dirty-file indicator string
+// (red dot + file count + added/deleted).
+func renderDirtyIndicator(filesChanged, linesAdded, linesDeleted int) string {
+	s := dirtyRedStyle.Render(" ●")
+	s += fmt.Sprintf(" %d files ", filesChanged)
+	s += diffAddStyle.Render(fmt.Sprintf("+%d", linesAdded))
+	s += "/" + diffDelStyle.Render(fmt.Sprintf("-%d", linesDeleted))
+	return s
 }
 
 func renderPlaceholderPane(width, height int) []string {
