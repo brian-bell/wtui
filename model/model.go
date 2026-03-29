@@ -19,6 +19,7 @@ const (
 	ModeBranches
 	ModeStashes
 	ModeHistory
+	ModeReflog
 )
 
 // OverlayState represents what overlay (if any) is displayed.
@@ -100,6 +101,11 @@ type WorktreePrunedMsg struct {
 	RepoPath string
 }
 
+type ReflogResultMsg struct {
+	RepoPath string
+	Reflogs  []gitquery.ReflogEntry
+}
+
 type ClipboardResultMsg struct{}
 
 type DeleteFailedMsg struct {
@@ -126,6 +132,9 @@ type Model struct {
 	commits          []gitquery.Commit
 	commitSelected   int
 	commitScroll     int
+	reflogs          []gitquery.ReflogEntry
+	reflogSelected   int
+	reflogScroll     int
 	overlay          OverlayState
 	overlayDiff      string
 	overlayScroll    int
@@ -144,30 +153,33 @@ func New(repos []scanner.Repo) Model {
 	return Model{repos: repos, mode: ModeWorktrees}
 }
 
-func (m Model) Selected() int                  { return m.selected }
-func (m Model) Width() int                     { return m.width }
-func (m Model) Height() int                    { return m.height }
-func (m Model) Mode() Mode                     { return m.mode }
-func (m Model) Rows() []gitquery.BranchRow     { return m.rows }
-func (m Model) Stashes() []gitquery.Stash      { return m.stashes }
-func (m Model) BranchSelected() int            { return m.branchSelected }
-func (m Model) StashSelected() int             { return m.stashSelected }
-func (m Model) Worktrees() []gitquery.Worktree { return m.worktrees }
-func (m Model) WorktreeSelected() int          { return m.worktreeSelected }
-func (m Model) WorktreeScroll() int            { return m.worktreeScroll }
-func (m Model) Commits() []gitquery.Commit     { return m.commits }
-func (m Model) CommitSelected() int            { return m.commitSelected }
-func (m Model) CommitScroll() int              { return m.commitScroll }
-func (m Model) Overlay() OverlayState          { return m.overlay }
-func (m Model) OverlayDiff() string            { return m.overlayDiff }
-func (m Model) OverlayScroll() int             { return m.overlayScroll }
-func (m Model) ConfirmPrompt() string          { return m.confirmPrompt }
-func (m Model) ConfirmForce() bool             { return m.confirmForce }
-func (m Model) BranchScroll() int              { return m.branchScroll }
-func (m Model) RepoScroll() int                { return m.repoScroll }
-func (m Model) StashScroll() int               { return m.stashScroll }
-func (m Model) ActivePane() int                { return m.activePane }
-func (m Model) Destructive() bool              { return m.destructive }
+func (m Model) Selected() int                   { return m.selected }
+func (m Model) Width() int                      { return m.width }
+func (m Model) Height() int                     { return m.height }
+func (m Model) Mode() Mode                      { return m.mode }
+func (m Model) Rows() []gitquery.BranchRow      { return m.rows }
+func (m Model) Stashes() []gitquery.Stash       { return m.stashes }
+func (m Model) BranchSelected() int             { return m.branchSelected }
+func (m Model) StashSelected() int              { return m.stashSelected }
+func (m Model) Worktrees() []gitquery.Worktree  { return m.worktrees }
+func (m Model) WorktreeSelected() int           { return m.worktreeSelected }
+func (m Model) WorktreeScroll() int             { return m.worktreeScroll }
+func (m Model) Commits() []gitquery.Commit      { return m.commits }
+func (m Model) CommitSelected() int             { return m.commitSelected }
+func (m Model) CommitScroll() int               { return m.commitScroll }
+func (m Model) Reflogs() []gitquery.ReflogEntry { return m.reflogs }
+func (m Model) ReflogSelected() int             { return m.reflogSelected }
+func (m Model) ReflogScroll() int               { return m.reflogScroll }
+func (m Model) Overlay() OverlayState           { return m.overlay }
+func (m Model) OverlayDiff() string             { return m.overlayDiff }
+func (m Model) OverlayScroll() int              { return m.overlayScroll }
+func (m Model) ConfirmPrompt() string           { return m.confirmPrompt }
+func (m Model) ConfirmForce() bool              { return m.confirmForce }
+func (m Model) BranchScroll() int               { return m.branchScroll }
+func (m Model) RepoScroll() int                 { return m.repoScroll }
+func (m Model) StashScroll() int                { return m.stashScroll }
+func (m Model) ActivePane() int                 { return m.activePane }
+func (m Model) Destructive() bool               { return m.destructive }
 
 func (m Model) Init() tea.Cmd {
 	return m.fetchForMode()
@@ -200,6 +212,9 @@ func (m Model) View() string {
 		Commits:          m.commits,
 		CommitSelected:   m.commitSelected,
 		CommitScroll:     m.commitScroll,
+		Reflogs:          m.reflogs,
+		ReflogSelected:   m.reflogSelected,
+		ReflogScroll:     m.reflogScroll,
 	})
 }
 
@@ -236,6 +251,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleWorktreePruned(msg)
 	case CommitResultMsg:
 		return m.handleCommitResult(msg), nil
+	case ReflogResultMsg:
+		return m.handleReflogResult(msg), nil
 	case WorktreeDiffResultMsg:
 		return m.handleWorktreeDiffResult(msg), nil
 	case CommitDiffResultMsg:
@@ -347,15 +364,19 @@ func (m Model) handleRightPaneKey(key string) (tea.Model, tea.Cmd) {
 			m.stashSelected = 0
 			m.commitSelected = 0
 			m.commitScroll = 0
+			m.reflogSelected = 0
+			m.reflogScroll = 0
 			return m, m.fetchForMode()
 		}
 	case "right", "l":
-		if m.mode < ModeHistory {
+		if m.mode < ModeReflog {
 			m.mode++
 			m.branchSelected = 0
 			m.stashSelected = 0
 			m.commitSelected = 0
 			m.commitScroll = 0
+			m.reflogSelected = 0
+			m.reflogScroll = 0
 			return m, m.fetchForMode()
 		}
 	case "1":
@@ -367,6 +388,8 @@ func (m Model) handleRightPaneKey(key string) (tea.Model, tea.Cmd) {
 			m.worktreeScroll = 0
 			m.commitSelected = 0
 			m.commitScroll = 0
+			m.reflogSelected = 0
+			m.reflogScroll = 0
 			return m, m.fetchWorktrees()
 		}
 	case "2":
@@ -376,6 +399,8 @@ func (m Model) handleRightPaneKey(key string) (tea.Model, tea.Cmd) {
 			m.stashSelected = 0
 			m.commitSelected = 0
 			m.commitScroll = 0
+			m.reflogSelected = 0
+			m.reflogScroll = 0
 			return m, m.fetchBranches()
 		}
 	case "3":
@@ -385,6 +410,8 @@ func (m Model) handleRightPaneKey(key string) (tea.Model, tea.Cmd) {
 			m.stashSelected = 0
 			m.commitSelected = 0
 			m.commitScroll = 0
+			m.reflogSelected = 0
+			m.reflogScroll = 0
 			return m, m.fetchStashes()
 		}
 	case "4":
@@ -392,7 +419,16 @@ func (m Model) handleRightPaneKey(key string) (tea.Model, tea.Cmd) {
 			m.mode = ModeHistory
 			m.commitSelected = 0
 			m.commitScroll = 0
+			m.reflogSelected = 0
+			m.reflogScroll = 0
 			return m, m.fetchCommits()
+		}
+	case "5":
+		if m.mode != ModeReflog {
+			m.mode = ModeReflog
+			m.reflogSelected = 0
+			m.reflogScroll = 0
+			return m, m.fetchReflog()
 		}
 	case "y":
 		return m.handleCopyHash()
@@ -454,6 +490,15 @@ func (m Model) handleCursorUp() (tea.Model, tea.Cmd) {
 			}
 			m = m.ensureCommitVisible()
 		}
+	case ModeReflog:
+		if len(m.reflogs) > 0 {
+			if m.reflogSelected > 0 {
+				m.reflogSelected--
+			} else {
+				m.reflogSelected = len(m.reflogs) - 1
+			}
+			m = m.ensureReflogVisible()
+		}
 	}
 	return m, nil
 }
@@ -496,6 +541,15 @@ func (m Model) handleCursorDown() (tea.Model, tea.Cmd) {
 			}
 			m = m.ensureCommitVisible()
 		}
+	case ModeReflog:
+		if len(m.reflogs) > 0 {
+			if m.reflogSelected < len(m.reflogs)-1 {
+				m.reflogSelected++
+			} else {
+				m.reflogSelected = 0
+			}
+			m = m.ensureReflogVisible()
+		}
 	}
 	return m, nil
 }
@@ -523,6 +577,10 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 		m.overlay = OverlayCommitDiff
 		return m, m.fetchCommitDiff()
 	}
+	if m.mode == ModeReflog && len(m.reflogs) > 0 {
+		m.overlay = OverlayCommitDiff
+		return m, m.fetchReflogDiff()
+	}
 	return m, nil
 }
 
@@ -530,7 +588,7 @@ func (m Model) handleDelete() (tea.Model, tea.Cmd) {
 	if !m.destructive {
 		return m, nil
 	}
-	if m.mode == ModeHistory {
+	if m.mode == ModeHistory || m.mode == ModeReflog {
 		return m, nil
 	}
 	if m.mode == ModeStashes && len(m.stashes) > 0 && len(m.repos) > 0 {
@@ -717,10 +775,13 @@ func (m Model) resetRightPaneCursors() Model {
 	m.worktreeScroll = 0
 	m.commitSelected = 0
 	m.commitScroll = 0
+	m.reflogSelected = 0
+	m.reflogScroll = 0
 	m.rows = nil
 	m.stashes = nil
 	m.worktrees = nil
 	m.commits = nil
+	m.reflogs = nil
 	return m
 }
 
@@ -894,6 +955,16 @@ func (m Model) handleCommitResult(msg CommitResultMsg) Model {
 	return m
 }
 
+func (m Model) handleReflogResult(msg ReflogResultMsg) Model {
+	if m.isCurrentRepo(msg.RepoPath) {
+		m.reflogs = msg.Reflogs
+		if len(m.reflogs) == 0 || m.reflogSelected >= len(m.reflogs) {
+			m.reflogSelected = 0
+		}
+	}
+	return m
+}
+
 func (m Model) handleCommitDiffResult(msg CommitDiffResultMsg) Model {
 	if m.isCurrentRepo(msg.RepoPath) {
 		if m.commitSelected < len(m.commits) && m.commits[m.commitSelected].Hash == msg.Hash {
@@ -904,10 +975,15 @@ func (m Model) handleCommitDiffResult(msg CommitDiffResultMsg) Model {
 }
 
 func (m Model) handleCopyHash() (tea.Model, tea.Cmd) {
-	if m.mode != ModeHistory || len(m.commits) == 0 {
+	var hash string
+	switch {
+	case m.mode == ModeHistory && len(m.commits) > 0:
+		hash = m.commits[m.commitSelected].Hash
+	case m.mode == ModeReflog && len(m.reflogs) > 0:
+		hash = m.reflogs[m.reflogSelected].Hash
+	default:
 		return m, nil
 	}
-	hash := m.commits[m.commitSelected].Hash
 	return m, func() tea.Msg {
 		_ = actions.CopyToClipboard(hash)
 		return ClipboardResultMsg{}
@@ -926,6 +1002,8 @@ func (m Model) fetchForMode() tea.Cmd {
 		return m.fetchStashes()
 	case ModeHistory:
 		return m.fetchCommits()
+	case ModeReflog:
+		return m.fetchReflog()
 	}
 	return nil
 }
@@ -1031,6 +1109,29 @@ func (m Model) fetchCommits() tea.Cmd {
 	}
 }
 
+func (m Model) fetchReflog() tea.Cmd {
+	repoPath, ok := m.currentRepoPath()
+	if !ok {
+		return nil
+	}
+	return func() tea.Msg {
+		reflogs, _ := gitquery.ListReflog(repoPath)
+		return ReflogResultMsg{RepoPath: repoPath, Reflogs: reflogs}
+	}
+}
+
+func (m Model) fetchReflogDiff() tea.Cmd {
+	repoPath, ok := m.currentRepoPath()
+	if !ok || len(m.reflogs) == 0 {
+		return nil
+	}
+	hash := m.reflogs[m.reflogSelected].Hash
+	return func() tea.Msg {
+		diff, _ := gitquery.CommitDiff(repoPath, hash)
+		return CommitDiffResultMsg{RepoPath: repoPath, Hash: hash, Diff: diff}
+	}
+}
+
 func (m Model) fetchCommitDiff() tea.Cmd {
 	repoPath, ok := m.currentRepoPath()
 	if !ok || len(m.commits) == 0 {
@@ -1110,6 +1211,20 @@ func (m Model) ensureWorktreeVisible() Model {
 	}
 	if m.worktreeSelected >= m.worktreeScroll+contentHeight {
 		m.worktreeScroll = m.worktreeSelected - contentHeight + 1
+	}
+	return m
+}
+
+func (m Model) ensureReflogVisible() Model {
+	contentHeight := m.height - ui.BranchContentOverhead
+	if contentHeight <= 0 {
+		contentHeight = 16
+	}
+	if m.reflogScroll > m.reflogSelected {
+		m.reflogScroll = m.reflogSelected
+	}
+	if m.reflogSelected >= m.reflogScroll+contentHeight {
+		m.reflogScroll = m.reflogSelected - contentHeight + 1
 	}
 	return m
 }

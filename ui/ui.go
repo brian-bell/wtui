@@ -86,6 +86,9 @@ type RenderParams struct {
 	Commits          []gitquery.Commit
 	CommitSelected   int
 	CommitScroll     int
+	Reflogs          []gitquery.ReflogEntry
+	ReflogSelected   int
+	ReflogScroll     int
 }
 
 // Render produces the full terminal view string.
@@ -156,11 +159,13 @@ func Render(p RenderParams) string {
 	stashSel := p.StashSelected
 	commitSel := p.CommitSelected
 	worktreeSel := p.WorktreeSelected
+	reflogSel := p.ReflogSelected
 	if p.ActivePane == 0 {
 		branchSel = -1
 		stashSel = -1
 		commitSel = -1
 		worktreeSel = -1
+		reflogSel = -1
 	}
 
 	var rightLines []string
@@ -173,6 +178,8 @@ func Render(p RenderParams) string {
 		rightLines = renderStashPane(p.Stashes, stashSel, p.StashScroll, rightContentWidth, rightContentHeight)
 	case p.Mode == 4 && len(p.Commits) > 0:
 		rightLines = renderCommitPane(p.Commits, commitSel, p.CommitScroll, rightContentWidth, rightContentHeight)
+	case p.Mode == 5 && len(p.Reflogs) > 0:
+		rightLines = renderReflogPane(p.Reflogs, reflogSel, p.ReflogScroll, rightContentWidth, rightContentHeight)
 	default:
 		rightLines = renderPlaceholderPane(rightContentWidth, rightContentHeight)
 	}
@@ -200,6 +207,7 @@ func renderModeHeader(mode, width int) string {
 		{2, "branches"},
 		{3, "stashes"},
 		{4, "history"},
+		{5, "reflog"},
 	}
 
 	var parts []string
@@ -223,6 +231,8 @@ func RenderStatusBar(width, mode, overlay, activePane int, destructive, staleSel
 		hints = "  y: confirm  n/esc: cancel"
 	case overlay != 0:
 		hints = "  ↑/↓ scroll  esc: close"
+	case mode == 5:
+		hints = "  tab: pane  q/esc: quit  ↑/↓ select  enter: diff  y: copy hash"
 	case mode == 4:
 		hints = "  tab: pane  q/esc: quit  ↑/↓ select  enter: diff  y: copy hash  t: terminal  c: code"
 	case mode == 3:
@@ -426,6 +436,25 @@ func renderCommitPane(commits []gitquery.Commit, selected, scroll, width, height
 
 		if i == selected {
 			line = stashSelStyle.Width(width).Render(fmt.Sprintf(" > %s  %s  %s  %s", c.Hash, c.Author, c.Date, c.Subject))
+		}
+
+		content = append(content, truncateToWidth(line, width))
+	}
+
+	return scrollAndPad(content, scroll, height)
+}
+
+func renderReflogPane(entries []gitquery.ReflogEntry, selected, scroll, width, height int) []string {
+	var content []string
+	for i, e := range entries {
+		hashStr := diffHdrStyle.Render(e.Hash)
+		selectorStr := branchStyle.Render(e.Selector)
+		dateStr := stashDateStyle.Render(e.Date)
+		subjectStr := stashMsgStyle.Render(e.Subject)
+		line := fmt.Sprintf("   %s  %s  %s  %s", hashStr, selectorStr, dateStr, subjectStr)
+
+		if i == selected {
+			line = stashSelStyle.Width(width).Render(fmt.Sprintf(" > %s  %s  %s  %s", e.Hash, e.Selector, e.Date, e.Subject))
 		}
 
 		content = append(content, truncateToWidth(line, width))

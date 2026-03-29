@@ -709,7 +709,7 @@ func TestBranchPane_NonWorktreeBranchShowsNoLabel(t *testing.T) {
 
 // --- History (mode 3) tests ---
 
-func TestModeHeader_ShowsFourModes(t *testing.T) {
+func TestModeHeader_ShowsFiveModes(t *testing.T) {
 	header := renderModeHeader(4, 80)
 	if !strings.Contains(header, "[4] history") {
 		t.Error("expected active '[4] history' in header")
@@ -722,6 +722,17 @@ func TestModeHeader_ShowsFourModes(t *testing.T) {
 	}
 	if !strings.Contains(header, "3 stashes") {
 		t.Error("expected inactive '3 stashes' in header")
+	}
+	if !strings.Contains(header, "5 reflog") {
+		t.Error("expected inactive '5 reflog' in header")
+	}
+	// Test mode 5 active
+	header5 := renderModeHeader(5, 80)
+	if !strings.Contains(header5, "[5] reflog") {
+		t.Error("expected active '[5] reflog' in header")
+	}
+	if !strings.Contains(header5, "4 history") {
+		t.Error("expected inactive '4 history' in header when mode 5 active")
 	}
 }
 
@@ -1026,5 +1037,53 @@ func TestRender_WorktreesModeShowsData(t *testing.T) {
 	}
 	if strings.Contains(view, "nothing here yet") {
 		t.Error("render should not show placeholder when worktree data exists")
+	}
+}
+
+// --- Reflog pane ---
+
+func TestReflogPane_ShowsEntryDetails(t *testing.T) {
+	entries := []gitquery.ReflogEntry{
+		{Hash: "abc1234", Selector: "HEAD@{0}", Date: "2 hours ago", Subject: "commit: Fix login bug"},
+		{Hash: "def5678", Selector: "HEAD@{1}", Date: "3 days ago", Subject: "checkout: moving from main to feature"},
+	}
+	lines := renderReflogPane(entries, 0, 0, 80, 10)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "abc1234") {
+		t.Error("expected hash 'abc1234' in output")
+	}
+	if !strings.Contains(joined, "HEAD@{0}") {
+		t.Error("expected selector 'HEAD@{0}' in output")
+	}
+	if !strings.Contains(joined, "2 hours ago") {
+		t.Error("expected date '2 hours ago' in output")
+	}
+	if !strings.Contains(joined, "commit: Fix login bug") {
+		t.Error("expected subject 'commit: Fix login bug' in output")
+	}
+}
+
+func TestReflogPane_SelectedHighlighted(t *testing.T) {
+	entries := []gitquery.ReflogEntry{
+		{Hash: "abc1234", Selector: "HEAD@{0}", Date: "2 hours ago", Subject: "commit: Fix login bug"},
+		{Hash: "def5678", Selector: "HEAD@{1}", Date: "3 days ago", Subject: "checkout: main to feature"},
+	}
+	lines := renderReflogPane(entries, 1, 0, 80, 10)
+	if !strings.Contains(lines[1], " > ") {
+		t.Error("expected selected row to contain ' > ' prefix")
+	}
+}
+
+func TestStatusBar_ReflogModeHints(t *testing.T) {
+	bar := RenderStatusBar(120, 5, 0, 1, false, false, false)
+	for _, hint := range []string{"enter: diff", "y: copy hash", "tab: pane", "q/esc: quit"} {
+		if !strings.Contains(bar, hint) {
+			t.Errorf("reflog status bar should contain %q", hint)
+		}
+	}
+	for _, forbidden := range []string{"d: delete", "d: drop", "D: destructive mode", "t: terminal", "c: code"} {
+		if strings.Contains(bar, forbidden) {
+			t.Errorf("reflog status bar should not contain %q", forbidden)
+		}
 	}
 }
