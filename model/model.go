@@ -104,8 +104,9 @@ type ClipboardResultMsg struct{}
 
 type DeleteFailedMsg struct {
 	RepoPath    string
-	Target      string       // branch name
+	Target      string       // display name (branch name or worktree path)
 	ForceAction func() error // the --force variant to call
+	SuccessMsg  tea.Msg      // returned after force succeeds; defaults to BranchDeletedMsg
 }
 
 // Model is the bubbletea application model.
@@ -647,7 +648,12 @@ func (m Model) confirmWorktreeDelete() (tea.Model, tea.Cmd) {
 	m.confirmAction = func() tea.Cmd {
 		return func() tea.Msg {
 			if err := actions.RemoveWorktree(repoPath, wtPath); err != nil {
-				return nil
+				return DeleteFailedMsg{
+					RepoPath:    repoPath,
+					Target:      wtPath,
+					ForceAction: func() error { return actions.ForceRemoveWorktree(repoPath, wtPath) },
+					SuccessMsg:  WorktreeRemovedMsg{RepoPath: repoPath, BranchName: branchName},
+				}
 			}
 			return WorktreeRemovedMsg{RepoPath: repoPath, BranchName: branchName}
 		}
@@ -849,9 +855,13 @@ func (m Model) handleDeleteFailed(msg DeleteFailedMsg) Model {
 		m.confirmPrompt = fmt.Sprintf("Force delete %s? (y/n)", msg.Target)
 		m.confirmForce = true
 		m.overlay = OverlayConfirm
+		successMsg := msg.SuccessMsg
 		m.confirmAction = func() tea.Cmd {
 			return func() tea.Msg {
 				_ = msg.ForceAction()
+				if successMsg != nil {
+					return successMsg
+				}
 				return BranchDeletedMsg{RepoPath: msg.RepoPath}
 			}
 		}

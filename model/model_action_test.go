@@ -1193,6 +1193,43 @@ func TestModel_DKeyOnWorktreeRequiresDestructiveMode(t *testing.T) {
 	}
 }
 
+func TestModel_WorktreeRemoveFailReturnsDeleteFailedMsg(t *testing.T) {
+	// Fake repo path → RemoveWorktree will fail → should return DeleteFailedMsg
+	m := modelWithWorktrees([]gitquery.Worktree{
+		{Path: "/dev/alpha", BranchName: "main", IsMain: true},
+		{Path: "/dev/alpha-feat", BranchName: "feat"},
+	})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if cmd == nil {
+		t.Fatal("expected cmd from confirm, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.DeleteFailedMsg); !ok {
+		t.Fatalf("expected DeleteFailedMsg on fake-path failure, got %T", msg)
+	}
+}
+
+func TestModel_WorktreeForceRemoveReturnsWorktreeRemovedMsg(t *testing.T) {
+	// DeleteFailedMsg with SuccessMsg set → force confirm → returns SuccessMsg type
+	m := model.New(testRepos())
+	m, _ = update(m, model.DeleteFailedMsg{
+		RepoPath:    "/dev/alpha",
+		Target:      "/dev/alpha-feat",
+		ForceAction: func() error { return nil },
+		SuccessMsg:  model.WorktreeRemovedMsg{RepoPath: "/dev/alpha", BranchName: "feat"},
+	})
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if cmd == nil {
+		t.Fatal("expected cmd from force confirm, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.WorktreeRemovedMsg); !ok {
+		t.Fatalf("expected WorktreeRemovedMsg after force remove, got %T", msg)
+	}
+}
+
 func TestModel_DKeyOnWorktreeShowsConfirm(t *testing.T) {
 	m := modelWithWorktrees([]gitquery.Worktree{
 		{Path: "/dev/alpha", BranchName: "main", IsMain: true},
