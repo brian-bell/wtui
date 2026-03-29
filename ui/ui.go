@@ -75,6 +75,9 @@ type RenderParams struct {
 	ActivePane     int
 	Destructive    bool
 	StaleSelected  bool
+	Commits        []gitquery.Commit
+	CommitSelected int
+	CommitScroll   int
 }
 
 // Render produces the full terminal view string.
@@ -137,9 +140,11 @@ func Render(p RenderParams) string {
 	// Hide cursor in right pane when left pane is active
 	branchSel := p.BranchSelected
 	stashSel := p.StashSelected
+	commitSel := p.CommitSelected
 	if p.ActivePane == 0 {
 		branchSel = -1
 		stashSel = -1
+		commitSel = -1
 	}
 
 	var rightLines []string
@@ -148,6 +153,8 @@ func Render(p RenderParams) string {
 		rightLines = renderBranchPaneSelected(p.Branches, branchSel, p.BranchScroll, rightContentWidth, rightContentHeight, repoPath)
 	case p.Mode == 2 && len(p.Stashes) > 0:
 		rightLines = renderStashPane(p.Stashes, stashSel, p.StashScroll, rightContentWidth, rightContentHeight)
+	case p.Mode == 3 && len(p.Commits) > 0:
+		rightLines = renderCommitPane(p.Commits, commitSel, p.CommitScroll, rightContentWidth, rightContentHeight)
 	default:
 		rightLines = renderPlaceholderPane(rightContentWidth, rightContentHeight)
 	}
@@ -173,6 +180,7 @@ func renderModeHeader(mode, width int) string {
 	}{
 		{1, "branches"},
 		{2, "stashes"},
+		{3, "history"},
 	}
 
 	var parts []string
@@ -195,6 +203,8 @@ func RenderStatusBar(width, mode, overlay, activePane int, destructive, staleSel
 		hints = "  y: confirm  n/esc: cancel"
 	} else if overlay != 0 {
 		hints = "  ↑/↓ scroll  esc: close"
+	} else if mode == 3 {
+		hints = "  tab: pane  q/esc: quit  ↑/↓ select  enter: diff  y: copy hash  t: terminal  c: code"
 	} else if mode == 2 {
 		hints = "  tab: pane  q/esc: quit  ↑/↓ select  enter: diff"
 		if destructive {
@@ -384,6 +394,33 @@ func renderStashPane(stashes []gitquery.Stash, selected, scroll, width, height i
 				content = append(content, contLine)
 			}
 		}
+	}
+
+	// Apply scroll offset
+	if scroll > len(content) {
+		scroll = len(content)
+	}
+	visible := content[scroll:]
+
+	lines := make([]string, height)
+	copy(lines, visible)
+	return lines
+}
+
+func renderCommitPane(commits []gitquery.Commit, selected, scroll, width, height int) []string {
+	var content []string
+	for i, c := range commits {
+		hashStr := diffHdrStyle.Render(c.Hash)
+		authorStr := branchStyle.Render(c.Author)
+		dateStr := stashDateStyle.Render(c.Date)
+		subjectStr := stashMsgStyle.Render(c.Subject)
+		line := fmt.Sprintf("   %s  %s  %s  %s", hashStr, authorStr, dateStr, subjectStr)
+
+		if i == selected {
+			line = stashSelStyle.Width(width).Render(fmt.Sprintf(" > %s  %s  %s  %s", c.Hash, c.Author, c.Date, c.Subject))
+		}
+
+		content = append(content, truncateToWidth(line, width))
 	}
 
 	// Apply scroll offset

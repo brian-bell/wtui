@@ -16,6 +16,14 @@ type Stash struct {
 	Message string
 }
 
+// Commit represents a single git commit entry.
+type Commit struct {
+	Hash    string
+	Author  string
+	Date    string
+	Subject string
+}
+
 // Branch represents a local git branch with its status.
 type Branch struct {
 	Name          string
@@ -57,6 +65,43 @@ func FlattenBranches(branches []Branch) []BranchRow {
 		}
 	}
 	return rows
+}
+
+// ListCommits returns the most recent 50 commits for the given repo path.
+func ListCommits(repoPath string) ([]Commit, error) {
+	text, err := gitCmd(repoPath, "log", "--format=%h%x00%an%x00%ar%x00%s", "-n", "50")
+	if err != nil {
+		return nil, fmt.Errorf("listing commits: %w", err)
+	}
+
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil, nil
+	}
+
+	var commits []Commit
+	for _, line := range strings.Split(text, "\n") {
+		parts := strings.SplitN(line, "\x00", 4)
+		if len(parts) != 4 {
+			continue
+		}
+		commits = append(commits, Commit{
+			Hash:    parts[0],
+			Author:  parts[1],
+			Date:    parts[2],
+			Subject: parts[3],
+		})
+	}
+	return commits, nil
+}
+
+// CommitDiff returns the full git show output for a specific commit.
+func CommitDiff(repoPath string, hash string) (string, error) {
+	out, err := gitCmd(repoPath, "show", hash)
+	if err != nil {
+		return "", fmt.Errorf("commit diff for %s: %w", hash, err)
+	}
+	return out, nil
 }
 
 // ListStashes returns stash entries for the given repo path.

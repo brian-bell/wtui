@@ -367,6 +367,24 @@ func TestOpenTerminal_Error(t *testing.T) {
 	}
 }
 
+func TestCopyToClipboard(t *testing.T) {
+	if _, err := exec.LookPath("pbcopy"); err != nil {
+		t.Skip("pbcopy not available")
+	}
+	err := actions.CopyToClipboard("test-hash-abc123")
+	if err != nil {
+		t.Fatalf("CopyToClipboard returned error: %v", err)
+	}
+	// Verify clipboard contents
+	out, err := exec.Command("pbpaste").Output()
+	if err != nil {
+		t.Fatalf("pbpaste failed: %v", err)
+	}
+	if string(out) != "test-hash-abc123" {
+		t.Errorf("expected clipboard %q, got %q", "test-hash-abc123", string(out))
+	}
+}
+
 func TestOpenVSCode_RunsWithoutPanic(t *testing.T) {
 	if os.Getenv("TEST_LAUNCH_APPS") == "" {
 		t.Skip("skipping: set TEST_LAUNCH_APPS=1 to run tests that launch GUI apps")

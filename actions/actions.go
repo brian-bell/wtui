@@ -3,6 +3,7 @@ package actions
 import (
 	"fmt"
 	"os/exec"
+	"strings"
 )
 
 // RemoveWorktree runs `git worktree remove` for the given worktree path,
@@ -45,6 +46,13 @@ func ForceDeleteBranch(repoPath, name string) error {
 func DropStash(repoPath string, index int) error {
 	ref := fmt.Sprintf("stash@{%d}", index)
 	return exec.Command("git", "-C", repoPath, "stash", "drop", ref).Run()
+}
+
+// CopyToClipboard copies text to the system clipboard using pbcopy.
+func CopyToClipboard(text string) error {
+	cmd := exec.Command("pbcopy")
+	cmd.Stdin = strings.NewReader(text)
+	return cmd.Run()
 }
 
 // OpenTerminal opens a new Terminal window at the given path.

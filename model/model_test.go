@@ -551,17 +551,34 @@ func TestModel_ModeSwitchOnKeyPress(t *testing.T) {
 	}
 }
 
-func TestModel_Key3IsNoOp(t *testing.T) {
+func TestModel_Key3SwitchesToHistoryMode(t *testing.T) {
 	m := model.New(testRepos())
 	m = inRightPane(m)
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	if m.Mode() != 3 {
+		t.Errorf("expected mode 3, got %d", m.Mode())
+	}
+}
+
+func TestModel_SwitchToMode3FiresFetchCommits(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	if cmd == nil {
+		t.Fatal("expected fetchCommits cmd on switch to mode 3, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.CommitResultMsg); !ok {
+		t.Errorf("expected CommitResultMsg, got %T", msg)
+	}
+}
+
+func TestModel_Key4IsNoOp(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 	if m.Mode() != 1 {
 		t.Errorf("expected mode unchanged at 1, got %d", m.Mode())
-	}
-	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
-	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
-	if m.Mode() != 2 {
-		t.Errorf("expected mode unchanged at 2, got %d", m.Mode())
 	}
 }
 
@@ -624,11 +641,32 @@ func TestModel_ModeClampsAtEdges(t *testing.T) {
 	if m.Mode() != 1 {
 		t.Errorf("expected mode 1 (clamped), got %d", m.Mode())
 	}
-	// Go to mode 2, right should stay at 2
-	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRight})
-	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRight})
+	// Go to mode 3, right should stay at 3
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRight}) // 2
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRight}) // 3
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRight}) // still 3
+	if m.Mode() != 3 {
+		t.Errorf("expected mode 3 (clamped), got %d", m.Mode())
+	}
+}
+
+func TestModel_RightFromStashesGoesToHistory(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}}) // stashes
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRight})                     // history
+	if m.Mode() != 3 {
+		t.Errorf("expected mode 3, got %d", m.Mode())
+	}
+}
+
+func TestModel_LeftFromHistoryGoesToStashes(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}}) // history
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyLeft})                      // stashes
 	if m.Mode() != 2 {
-		t.Errorf("expected mode 2 (clamped), got %d", m.Mode())
+		t.Errorf("expected mode 2, got %d", m.Mode())
 	}
 }
 
@@ -786,6 +824,103 @@ func TestModel_StashDroppedMsgTriggersStashFetch(t *testing.T) {
 	msg := cmd()
 	if _, ok := msg.(model.StashResultMsg); !ok {
 		t.Errorf("expected StashResultMsg, got %T", msg)
+	}
+}
+
+// --- Commit result handlers ---
+
+func testCommits() []gitquery.Commit {
+	return []gitquery.Commit{
+		{Hash: "abc1234", Author: "alice", Date: "2 hours ago", Subject: "Fix login bug"},
+		{Hash: "def5678", Author: "bob", Date: "3 days ago", Subject: "Add profile page"},
+		{Hash: "ghi9012", Author: "alice", Date: "1 week ago", Subject: "Refactor DB layer"},
+	}
+}
+
+func TestModel_CommitResultUpdatesState(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, model.CommitResultMsg{RepoPath: "/dev/alpha", Commits: testCommits()})
+	if len(m.Commits()) != 3 {
+		t.Fatalf("expected 3 commits, got %d", len(m.Commits()))
+	}
+}
+
+func TestModel_StaleCommitResultDiscarded(t *testing.T) {
+	m := model.New(testRepos())
+	m = selectBravo(m) // selected=bravo
+	m, _ = update(m, model.CommitResultMsg{RepoPath: "/dev/alpha", Commits: testCommits()})
+	if len(m.Commits()) != 0 {
+		t.Errorf("expected stale commit result discarded, got %d commits", len(m.Commits()))
+	}
+}
+
+func TestModel_CommitCursorWraps(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m, _ = update(m, model.CommitResultMsg{RepoPath: "/dev/alpha", Commits: testCommits()})
+	// Wrap backward from 0 to last
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyUp})
+	if m.CommitSelected() != 2 {
+		t.Errorf("expected CommitSelected to wrap to 2, got %d", m.CommitSelected())
+	}
+	// Wrap forward from last to 0
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.CommitSelected() != 0 {
+		t.Errorf("expected CommitSelected to wrap to 0, got %d", m.CommitSelected())
+	}
+}
+
+func TestModel_CommitScrollFollowsCursor(t *testing.T) {
+	commits := make([]gitquery.Commit, 20)
+	for i := range commits {
+		commits[i] = gitquery.Commit{Hash: fmt.Sprintf("abc%04d", i), Author: "test", Date: "now", Subject: fmt.Sprintf("commit %d", i)}
+	}
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: ui.BranchContentOverhead + 3})
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m, _ = update(m, model.CommitResultMsg{RepoPath: "/dev/alpha", Commits: commits})
+
+	// Move cursor past viewport
+	for i := 0; i < 10; i++ {
+		m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	if m.CommitScroll() == 0 {
+		t.Error("expected scroll to advance when cursor moves past viewport")
+	}
+}
+
+func TestModel_ModeSwitchResetsCommitCursors(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m, _ = update(m, model.CommitResultMsg{RepoPath: "/dev/alpha", Commits: testCommits()})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.CommitSelected() != 2 {
+		t.Fatalf("expected CommitSelected 2, got %d", m.CommitSelected())
+	}
+	// Switch away and back
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	if m.CommitSelected() != 0 {
+		t.Errorf("expected CommitSelected reset to 0, got %d", m.CommitSelected())
+	}
+}
+
+func TestModel_RepoSwitchClearsCommits(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m, _ = update(m, model.CommitResultMsg{RepoPath: "/dev/alpha", Commits: testCommits()})
+	if len(m.Commits()) != 3 {
+		t.Fatal("expected 3 commits")
+	}
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyTab}) // switch to left pane
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if len(m.Commits()) != 0 {
+		t.Errorf("expected commits cleared on repo switch, got %d", len(m.Commits()))
 	}
 }
 
