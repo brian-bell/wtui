@@ -752,10 +752,19 @@ func TestModel_NumberKeysSwitchToCorrectModes(t *testing.T) {
 	}
 }
 
-func TestModel_Key5IsNoOp(t *testing.T) {
+func TestModel_Key5SwitchesToReflog(t *testing.T) {
 	m := model.New(testRepos())
 	m = inRightPane(m)
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	if m.Mode() != 5 {
+		t.Errorf("expected mode 5 (reflog), got %d", m.Mode())
+	}
+}
+
+func TestModel_Key6IsNoOp(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
 	if m.Mode() != 1 {
 		t.Errorf("expected mode unchanged at 1, got %d", m.Mode())
 	}
@@ -813,7 +822,7 @@ func TestModel_HLSwitchModes(t *testing.T) {
 	}
 }
 
-func TestModel_RightCyclesThroughAllFourModes(t *testing.T) {
+func TestModel_RightCyclesThroughAllFiveModes(t *testing.T) {
 	m := model.New(testRepos())
 	m = inRightPane(m)
 	// Start at ModeWorktrees (1)
@@ -832,25 +841,33 @@ func TestModel_RightCyclesThroughAllFourModes(t *testing.T) {
 	if m.Mode() != 4 {
 		t.Errorf("expected mode 4 after third right, got %d", m.Mode())
 	}
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRight}) // 5
+	if m.Mode() != 5 {
+		t.Errorf("expected mode 5 after fourth right, got %d", m.Mode())
+	}
 }
 
-func TestModel_LeftCyclesBackThroughAllFourModes(t *testing.T) {
+func TestModel_LeftCyclesBackThroughAllFiveModes(t *testing.T) {
 	m := model.New(testRepos())
 	m = inRightPane(m)
-	// Go to mode 4
-	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
-	// Left through 3, 2, 1
+	// Go to mode 5
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	// Left through 4, 3, 2, 1
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyLeft}) // 4
+	if m.Mode() != 4 {
+		t.Errorf("expected mode 4 after first left, got %d", m.Mode())
+	}
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyLeft}) // 3
 	if m.Mode() != 3 {
-		t.Errorf("expected mode 3 after first left, got %d", m.Mode())
+		t.Errorf("expected mode 3 after second left, got %d", m.Mode())
 	}
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyLeft}) // 2
 	if m.Mode() != 2 {
-		t.Errorf("expected mode 2 after second left, got %d", m.Mode())
+		t.Errorf("expected mode 2 after third left, got %d", m.Mode())
 	}
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyLeft}) // 1
 	if m.Mode() != 1 {
-		t.Errorf("expected mode 1 after third left, got %d", m.Mode())
+		t.Errorf("expected mode 1 after fourth left, got %d", m.Mode())
 	}
 }
 
@@ -862,13 +879,14 @@ func TestModel_ModeClampsAtEdges(t *testing.T) {
 	if m.Mode() != 1 {
 		t.Errorf("expected mode 1 (clamped), got %d", m.Mode())
 	}
-	// Go to mode 4 (ModeHistory), right should stay at 4
+	// Go to mode 5 (ModeReflog), right should stay at 5
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRight}) // 2
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRight}) // 3
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRight}) // 4
-	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRight}) // still 4
-	if m.Mode() != 4 {
-		t.Errorf("expected mode 4 (clamped), got %d", m.Mode())
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRight}) // 5
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRight}) // still 5
+	if m.Mode() != 5 {
+		t.Errorf("expected mode 5 (clamped), got %d", m.Mode())
 	}
 }
 
@@ -1194,5 +1212,104 @@ func TestModel_NoRootBranchDoesNotPanic(t *testing.T) {
 	}
 	if rows[0].Branch.Name != "feat-a" {
 		t.Errorf("expected original order preserved, got %q first", rows[0].Branch.Name)
+	}
+}
+
+// --- Reflog tests ---
+
+func testReflogs() []gitquery.ReflogEntry {
+	return []gitquery.ReflogEntry{
+		{Hash: "abc1234", Selector: "HEAD@{0}", Date: "2 hours ago", Subject: "commit: Fix login bug"},
+		{Hash: "def5678", Selector: "HEAD@{1}", Date: "3 days ago", Subject: "checkout: moving from main to feature"},
+		{Hash: "ghi9012", Selector: "HEAD@{2}", Date: "1 week ago", Subject: "commit (initial): init"},
+	}
+}
+
+func TestModel_ReflogResultUpdatesState(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, model.ReflogResultMsg{RepoPath: "/dev/alpha", Reflogs: testReflogs()})
+	if len(m.Reflogs()) != 3 {
+		t.Fatalf("expected 3 reflogs, got %d", len(m.Reflogs()))
+	}
+}
+
+func TestModel_SwitchToReflogFiresFetch(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	if m.Mode() != 5 {
+		t.Fatalf("expected mode 5, got %d", m.Mode())
+	}
+	if cmd == nil {
+		t.Fatal("expected non-nil cmd")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.ReflogResultMsg); !ok {
+		t.Errorf("expected ReflogResultMsg, got %T", msg)
+	}
+}
+
+func TestModel_StaleReflogResultDiscarded(t *testing.T) {
+	m := model.New(testRepos())
+	m = selectBravo(m) // selected=bravo
+	m, _ = update(m, model.ReflogResultMsg{RepoPath: "/dev/alpha", Reflogs: testReflogs()})
+	if len(m.Reflogs()) != 0 {
+		t.Errorf("expected stale reflog result discarded, got %d reflogs", len(m.Reflogs()))
+	}
+}
+
+func TestModel_ReflogCursorWraps(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	m, _ = update(m, model.ReflogResultMsg{RepoPath: "/dev/alpha", Reflogs: testReflogs()})
+	// Wrap backward from 0 to last
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyUp})
+	if m.ReflogSelected() != 2 {
+		t.Errorf("expected ReflogSelected to wrap to 2, got %d", m.ReflogSelected())
+	}
+	// Wrap forward from last to 0
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.ReflogSelected() != 0 {
+		t.Errorf("expected ReflogSelected to wrap to 0, got %d", m.ReflogSelected())
+	}
+}
+
+func TestModel_ReflogScrollFollowsCursor(t *testing.T) {
+	var entries []gitquery.ReflogEntry
+	for i := 0; i < 20; i++ {
+		entries = append(entries, gitquery.ReflogEntry{
+			Hash:     fmt.Sprintf("abc%04d", i),
+			Selector: fmt.Sprintf("HEAD@{%d}", i),
+			Date:     "2 hours ago",
+			Subject:  fmt.Sprintf("commit: change %d", i),
+		})
+	}
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 120, Height: ui.BranchContentOverhead + 3})
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	m, _ = update(m, model.ReflogResultMsg{RepoPath: "/dev/alpha", Reflogs: entries})
+	for i := 0; i < 10; i++ {
+		m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	if m.ReflogScroll() == 0 {
+		t.Error("expected reflog scroll to advance, got 0")
+	}
+}
+
+func TestModel_RepoSwitchClearsReflogs(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	m, _ = update(m, model.ReflogResultMsg{RepoPath: "/dev/alpha", Reflogs: testReflogs()})
+	if len(m.Reflogs()) != 3 {
+		t.Fatalf("expected 3 reflogs loaded, got %d", len(m.Reflogs()))
+	}
+	// Switch to left pane and navigate down
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if len(m.Reflogs()) != 0 {
+		t.Errorf("expected reflogs cleared on repo switch, got %d", len(m.Reflogs()))
 	}
 }

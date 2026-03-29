@@ -24,6 +24,14 @@ type Commit struct {
 	Subject string
 }
 
+// ReflogEntry represents a single HEAD reflog entry.
+type ReflogEntry struct {
+	Hash     string
+	Selector string
+	Date     string
+	Subject  string
+}
+
 // Worktree represents a single git worktree checkout.
 type Worktree struct {
 	Path         string
@@ -179,6 +187,34 @@ func ListCommits(repoPath string) ([]Commit, error) {
 		})
 	}
 	return commits, nil
+}
+
+// ListReflog returns the most recent 50 HEAD reflog entries for the given repo path.
+func ListReflog(repoPath string) ([]ReflogEntry, error) {
+	text, err := gitCmd(repoPath, "reflog", "--format=%h%x00%gd%x00%ar%x00%gs", "-n", "50")
+	if err != nil {
+		return nil, fmt.Errorf("listing reflog: %w", err)
+	}
+
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil, nil
+	}
+
+	var entries []ReflogEntry
+	for _, line := range strings.Split(text, "\n") {
+		parts := strings.SplitN(line, "\x00", 4)
+		if len(parts) != 4 {
+			continue
+		}
+		entries = append(entries, ReflogEntry{
+			Hash:     parts[0],
+			Selector: parts[1],
+			Date:     parts[2],
+			Subject:  parts[3],
+		})
+	}
+	return entries, nil
 }
 
 // CommitDiff returns the full git show output for a specific commit.

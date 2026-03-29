@@ -1032,3 +1032,42 @@ func TestListWorktrees_CleanWorktree(t *testing.T) {
 		t.Errorf("expected FilesChanged = 0, got %d", cleanWt.FilesChanged)
 	}
 }
+
+// --- Reflog tests ---
+
+func TestListReflog_ReturnsEntries(t *testing.T) {
+	dir := realPath(t, t.TempDir())
+	initRepo(t, dir)
+
+	writeFile(t, dir, "a.txt", "one")
+	run(t, dir, "git", "add", ".")
+	run(t, dir, "git", "commit", "-m", "second commit")
+
+	entries, err := gitquery.ListReflog(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) < 2 {
+		t.Fatalf("expected at least 2 reflog entries, got %d", len(entries))
+	}
+	e := entries[0]
+	if e.Hash == "" {
+		t.Error("expected non-empty Hash")
+	}
+	if e.Selector == "" {
+		t.Error("expected non-empty Selector")
+	}
+	if e.Date == "" {
+		t.Error("expected non-empty Date")
+	}
+	if e.Subject == "" {
+		t.Error("expected non-empty Subject")
+	}
+}
+
+func TestListReflog_InvalidPath(t *testing.T) {
+	_, err := gitquery.ListReflog("/no/such/path")
+	if err == nil {
+		t.Fatal("expected error for invalid path, got nil")
+	}
+}

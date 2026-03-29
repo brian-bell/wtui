@@ -80,7 +80,7 @@ func TestModel_ViewStashesModeShowsPlaceholder(t *testing.T) {
 	}
 }
 
-func TestModel_ViewModeHeaderShowsFourModes(t *testing.T) {
+func TestModel_ViewModeHeaderShowsFiveModes(t *testing.T) {
 	m := model.New(testRepos())
 	m, _ = update(m, tea.WindowSizeMsg{Width: 120, Height: 24})
 
@@ -131,6 +131,19 @@ func TestModel_ViewModeHeaderShowsFourModes(t *testing.T) {
 	}
 	if !strings.Contains(view, "3 stashes") {
 		t.Error("mode 4 active: right pane header should show inactive '3 stashes'")
+	}
+	if !strings.Contains(view, "5 reflog") {
+		t.Error("mode 4 active: right pane header should show inactive '5 reflog'")
+	}
+
+	// Switch to mode 5 (reflog)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRight})
+	view = m.View()
+	if !strings.Contains(view, "[5] reflog") {
+		t.Error("mode 5 active: right pane header should contain '[5] reflog'")
+	}
+	if !strings.Contains(view, "4 history") {
+		t.Error("mode 5 active: right pane header should show inactive '4 history'")
 	}
 }
 
@@ -469,5 +482,39 @@ func TestModel_ViewWorktreeDiffOverlayShowsDiff(t *testing.T) {
 	}
 	if !strings.Contains(view, "esc") {
 		t.Error("overlay should show esc hint")
+	}
+}
+
+func TestModel_ViewReflogModeShowsReflogContent(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	m, _ = update(m, model.ReflogResultMsg{
+		RepoPath: "/dev/alpha",
+		Reflogs:  testReflogs(),
+	})
+
+	view := m.View()
+	if !strings.Contains(view, "commit: Fix login bug") {
+		t.Error("reflog mode should show reflog subject")
+	}
+	if !strings.Contains(view, "HEAD@{0}") {
+		t.Error("reflog mode should show reflog selector")
+	}
+	if strings.Contains(view, "nothing here yet") {
+		t.Error("reflog mode should not show placeholder when data exists")
+	}
+}
+
+func TestModel_ViewReflogModeShowsPlaceholder(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+
+	view := m.View()
+	if !strings.Contains(view, "nothing here yet") {
+		t.Error("reflog mode with no data should show placeholder")
 	}
 }

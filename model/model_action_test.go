@@ -1245,3 +1245,68 @@ func TestModel_DKeyOnWorktreeShowsConfirm(t *testing.T) {
 		t.Errorf("confirm prompt should contain worktree path, got %q", m.ConfirmPrompt())
 	}
 }
+
+// --- Reflog mode actions ---
+
+func modelInReflogWithEntries() model.Model {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	m, _ = update(m, model.ReflogResultMsg{RepoPath: "/dev/alpha", Reflogs: testReflogs()})
+	return m
+}
+
+func TestModel_DKeyNoOpInReflogMode(t *testing.T) {
+	m := modelInReflogWithEntries()
+	m = enableDestructive(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if m.Overlay() != model.OverlayNone {
+		t.Errorf("expected OverlayNone in reflog mode, got %d", m.Overlay())
+	}
+}
+
+func TestModel_YKeyCopiesHashInReflogMode(t *testing.T) {
+	m := modelInReflogWithEntries()
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if cmd == nil {
+		t.Error("expected non-nil cmd for y key in reflog mode")
+	}
+}
+
+func TestModel_YKeyNoOpWithNoReflogs(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if cmd != nil {
+		t.Errorf("expected nil cmd for y key with no reflogs, got %T", cmd)
+	}
+}
+
+func TestModel_EnterInReflogOpensCommitDiffOverlay(t *testing.T) {
+	m := modelInReflogWithEntries()
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.Overlay() != model.OverlayCommitDiff {
+		t.Errorf("expected OverlayCommitDiff, got %d", m.Overlay())
+	}
+	if cmd == nil {
+		t.Fatal("expected fetchReflogDiff cmd, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.CommitDiffResultMsg); !ok {
+		t.Errorf("expected CommitDiffResultMsg, got %T", msg)
+	}
+}
+
+func TestModel_EnterInReflogNoEntriesIsNoOp(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.Overlay() != model.OverlayNone {
+		t.Errorf("expected OverlayNone, got %d", m.Overlay())
+	}
+	if cmd != nil {
+		t.Errorf("expected nil cmd, got %T", cmd)
+	}
+}
