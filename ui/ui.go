@@ -243,14 +243,25 @@ func RenderStatusBar(width, mode, overlay, activePane int, destructive, staleSel
 			keys += "  D: destructive mode"
 		}
 		hints = " " + cleanStyle.Render("✔") + " clean  " + aheadBehindStyle.Render("●") + " ahead/behind  " + dirtyRedStyle.Render("●") + " dirty  " + noUpstreamStyle.Render("●") + " no upstream" + keys
-	} else {
+	} else if mode == 1 {
 		hints = "  tab: pane  q/esc: quit  ↑/↓ select"
-		if mode == 1 && activePane == 1 && !staleSelected {
+		if activePane == 1 && !staleSelected {
 			if dirtySelected {
 				hints += "  enter: diff"
 			}
 			hints += "  t: terminal  c: code"
+			if destructive {
+				hints += "  " + dirtyRedStyle.Render("d: delete")
+			}
 		}
+		if activePane == 1 && staleSelected && destructive {
+			hints += "  " + dirtyRedStyle.Render("p: prune")
+		}
+		if !destructive {
+			hints += "  D: destructive mode"
+		}
+	} else {
+		hints = "  tab: pane  q/esc: quit  ↑/↓ select"
 	}
 
 	return statusStyle.Width(width).Render(hints)

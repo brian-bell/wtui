@@ -315,6 +315,66 @@ func TestModel_ViewDestructiveModeHidesDestructiveHint(t *testing.T) {
 	}
 }
 
+func TestModel_ViewWorktreesModeDestructiveShowsDeleteHint(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}}) // enable destructive
+	wts := []gitquery.Worktree{
+		{Path: "/dev/alpha", BranchName: "main", IsMain: true},
+		{Path: "/dev/alpha-feat", BranchName: "feat"},
+	}
+	m, _ = update(m, model.WorktreeResultMsg{RepoPath: "/dev/alpha", Worktrees: wts})
+	// Navigate to non-root worktree
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+
+	view := m.View()
+	if !strings.Contains(view, "d: delete") {
+		t.Error("worktrees mode destructive non-stale should show 'd: delete'")
+	}
+	if strings.Contains(view, "p: prune") {
+		t.Error("worktrees mode destructive non-stale should NOT show 'p: prune'")
+	}
+}
+
+func TestModel_ViewWorktreesModeDestructiveStaleShowsPruneHint(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}}) // enable destructive
+	wts := []gitquery.Worktree{
+		{Path: "/dev/gone", BranchName: "stale-branch", Stale: true},
+	}
+	m, _ = update(m, model.WorktreeResultMsg{RepoPath: "/dev/alpha", Worktrees: wts})
+
+	view := m.View()
+	if !strings.Contains(view, "p: prune") {
+		t.Error("worktrees mode destructive stale should show 'p: prune'")
+	}
+	if strings.Contains(view, "d: delete") {
+		t.Error("worktrees mode destructive stale should NOT show 'd: delete'")
+	}
+}
+
+func TestModel_ViewWorktreesModeReadOnlyShowsDestructiveHint(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	m = inRightPane(m)
+	// Destructive mode NOT enabled
+	wts := []gitquery.Worktree{
+		{Path: "/dev/alpha-feat", BranchName: "feat"},
+	}
+	m, _ = update(m, model.WorktreeResultMsg{RepoPath: "/dev/alpha", Worktrees: wts})
+
+	view := m.View()
+	if !strings.Contains(view, "D: destructive mode") {
+		t.Error("worktrees mode read-only should show 'D: destructive mode'")
+	}
+	if strings.Contains(view, "d: delete") {
+		t.Error("worktrees mode read-only should NOT show 'd: delete'")
+	}
+}
+
 func TestModel_ViewWorktreesModeShowsWorktreeContent(t *testing.T) {
 	m := model.New(testRepos())
 	m, _ = update(m, tea.WindowSizeMsg{Width: 120, Height: 24})

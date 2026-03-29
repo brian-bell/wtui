@@ -953,11 +953,53 @@ func TestStatusBar_WorktreesModeStaleHidesAllActionHints(t *testing.T) {
 	}
 }
 
+func TestStatusBar_WorktreesModeDestructiveNonStaleShowsDelete(t *testing.T) {
+	bar := RenderStatusBar(120, 1, 0, 1, true, false, false) // destructive, not stale
+	if !strings.Contains(bar, "d: delete") {
+		t.Error("worktrees mode destructive non-stale should show 'd: delete'")
+	}
+	if strings.Contains(bar, "p: prune") {
+		t.Error("worktrees mode destructive non-stale should NOT show 'p: prune'")
+	}
+}
+
+func TestStatusBar_WorktreesModeDestructiveStaleShowsPrune(t *testing.T) {
+	bar := RenderStatusBar(120, 1, 0, 1, true, true, false) // destructive, stale
+	if !strings.Contains(bar, "p: prune") {
+		t.Error("worktrees mode destructive stale should show 'p: prune'")
+	}
+	if strings.Contains(bar, "d: delete") {
+		t.Error("worktrees mode destructive stale should NOT show 'd: delete'")
+	}
+}
+
+func TestStatusBar_WorktreesModeReadOnlyShowsDestructiveHint(t *testing.T) {
+	bar := RenderStatusBar(120, 1, 0, 1, false, false, false) // read-only
+	if !strings.Contains(bar, "D: destructive mode") {
+		t.Error("worktrees mode read-only should show 'D: destructive mode'")
+	}
+	if strings.Contains(bar, "d: delete") {
+		t.Error("worktrees mode read-only should NOT show 'd: delete'")
+	}
+	if strings.Contains(bar, "p: prune") {
+		t.Error("worktrees mode read-only should NOT show 'p: prune'")
+	}
+}
+
+func TestStatusBar_WorktreesModeRightPaneShowsActionHints(t *testing.T) {
+	bar := RenderStatusBar(120, 1, 0, 1, true, false, false) // right pane active
+	for _, hint := range []string{"t: terminal", "c: code"} {
+		if !strings.Contains(bar, hint) {
+			t.Errorf("worktrees mode right pane should show %q", hint)
+		}
+	}
+}
+
 func TestStatusBar_WorktreesModeLeftPaneHidesActionHints(t *testing.T) {
-	bar := RenderStatusBar(120, 1, 0, 0, false, false, true)
-	for _, hint := range []string{"enter: diff", "t: terminal", "c: code"} {
+	bar := RenderStatusBar(120, 1, 0, 0, true, false, true) // left pane active, destructive
+	for _, hint := range []string{"enter: diff", "t: terminal", "c: code", "d: delete", "p: prune"} {
 		if strings.Contains(bar, hint) {
-			t.Errorf("worktrees mode should NOT show %q when left pane active", hint)
+			t.Errorf("worktrees mode left pane should hide %q", hint)
 		}
 	}
 }

@@ -87,12 +87,26 @@ type WorktreeDiffResultMsg struct {
 	Diff         string
 }
 
+type WorktreeRemovedMsg struct {
+	RepoPath   string
+	BranchName string // empty if detached
+}
+
+type WorktreeDeleteCompletedMsg struct {
+	RepoPath string
+}
+
+type WorktreePrunedMsg struct {
+	RepoPath string
+}
+
 type ClipboardResultMsg struct{}
 
 type DeleteFailedMsg struct {
 	RepoPath    string
-	Target      string       // branch name
+	Target      string       // display name (branch name or worktree path)
 	ForceAction func() error // the --force variant to call
+	SuccessMsg  tea.Msg      // returned after force succeeds; defaults to BranchDeletedMsg
 }
 
 // Model is the bubbletea application model.
@@ -214,6 +228,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleBranchDeleted(msg)
 	case WorktreeResultMsg:
 		return m.handleWorktreeResult(msg), nil
+	case WorktreeRemovedMsg:
+		return m.handleWorktreeRemoved(msg)
+	case WorktreeDeleteCompletedMsg:
+		return m, nil
+	case WorktreePrunedMsg:
+		return m.handleWorktreePruned(msg)
 	case CommitResultMsg:
 		return m.handleCommitResult(msg), nil
 	case WorktreeDiffResultMsg:
@@ -382,6 +402,8 @@ func (m Model) handleRightPaneKey(key string) (tea.Model, tea.Cmd) {
 		return m.handleEnter()
 	case "d":
 		return m.handleDelete()
+	case "p":
+		return m.handlePrune()
 	case "t":
 		return m.handleOpenTerminal()
 	case "c":
@@ -509,6 +531,9 @@ func (m Model) handleDelete() (tea.Model, tea.Cmd) {
 	if m.mode == ModeBranches && len(m.repos) > 0 {
 		return m.confirmBranchDelete()
 	}
+	if m.mode == ModeWorktrees && len(m.worktrees) > 0 && len(m.repos) > 0 {
+		return m.confirmWorktreeDelete()
+	}
 	return m, nil
 }
 
@@ -600,6 +625,74 @@ func (m Model) confirmBranchDelete() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) confirmWorktreeDelete() (tea.Model, tea.Cmd) {
+	wt, ok := m.selectedWorktree()
+	if !ok {
+		return m, nil
+	}
+	if wt.IsMain {
+		return m, nil
+	}
+	if wt.Stale {
+		return m, nil
+	}
+
+	repoPath := m.repos[m.selected].Path
+	wtPath := wt.Path
+	branchName := wt.BranchName
+	if wt.Detached {
+		branchName = ""
+	}
+
+	m.confirmPrompt = fmt.Sprintf("Remove worktree at %s? (y/n)", wtPath)
+	m.confirmAction = func() tea.Cmd {
+		return func() tea.Msg {
+			if err := actions.RemoveWorktree(repoPath, wtPath); err != nil {
+				return DeleteFailedMsg{
+					RepoPath:    repoPath,
+					Target:      wtPath,
+					ForceAction: func() error { return actions.ForceRemoveWorktree(repoPath, wtPath) },
+					SuccessMsg:  WorktreeRemovedMsg{RepoPath: repoPath, BranchName: branchName},
+				}
+			}
+			return WorktreeRemovedMsg{RepoPath: repoPath, BranchName: branchName}
+		}
+	}
+	m.overlay = OverlayConfirm
+	return m, nil
+}
+
+func (m Model) handlePrune() (tea.Model, tea.Cmd) {
+	if !m.destructive {
+		return m, nil
+	}
+	if m.mode == ModeWorktrees && len(m.worktrees) > 0 && len(m.repos) > 0 {
+		return m.confirmWorktreePrune()
+	}
+	return m, nil
+}
+
+func (m Model) confirmWorktreePrune() (tea.Model, tea.Cmd) {
+	wt, ok := m.selectedWorktree()
+	if !ok {
+		return m, nil
+	}
+	if !wt.Stale {
+		return m, nil
+	}
+
+	repoPath := m.repos[m.selected].Path
+	m.confirmPrompt = "Prune stale worktrees? (y/n)"
+	m.confirmAction = func() tea.Cmd {
+		return func() tea.Msg {
+			_ = actions.PruneWorktree(repoPath)
+			return WorktreePrunedMsg{RepoPath: repoPath}
+		}
+	}
+	m.overlay = OverlayConfirm
+	return m, nil
+}
+
 func (m Model) clearConfirm() Model {
 	m.overlay = OverlayNone
 	m.confirmPrompt = ""
@@ -638,6 +731,45 @@ func (m Model) handleWorktreeResult(msg WorktreeResultMsg) Model {
 		}
 	}
 	return m
+}
+
+func (m Model) handleWorktreeRemoved(msg WorktreeRemovedMsg) (tea.Model, tea.Cmd) {
+	if !m.isCurrentRepo(msg.RepoPath) {
+		return m, nil
+	}
+	if m.worktreeSelected >= len(m.worktrees)-1 && m.worktreeSelected > 0 {
+		m.worktreeSelected--
+	}
+	if msg.BranchName == "" {
+		return m, m.fetchWorktrees()
+	}
+	repoPath := msg.RepoPath
+	branchName := msg.BranchName
+	m.confirmPrompt = fmt.Sprintf("Also delete branch %s? (y/n)", branchName)
+	m.confirmAction = func() tea.Cmd {
+		return func() tea.Msg {
+			if err := actions.DeleteBranch(repoPath, branchName); err != nil {
+				return DeleteFailedMsg{
+					RepoPath:    repoPath,
+					Target:      branchName,
+					ForceAction: func() error { return actions.ForceDeleteBranch(repoPath, branchName) },
+				}
+			}
+			return WorktreeDeleteCompletedMsg{RepoPath: repoPath}
+		}
+	}
+	m.overlay = OverlayConfirm
+	return m, m.fetchWorktrees()
+}
+
+func (m Model) handleWorktreePruned(msg WorktreePrunedMsg) (tea.Model, tea.Cmd) {
+	if m.isCurrentRepo(msg.RepoPath) {
+		if m.worktreeSelected >= len(m.worktrees)-1 && m.worktreeSelected > 0 {
+			m.worktreeSelected--
+		}
+		return m, m.fetchWorktrees()
+	}
+	return m, nil
 }
 
 func (m Model) handleBranchResult(msg BranchResultMsg) Model {
@@ -723,9 +855,13 @@ func (m Model) handleDeleteFailed(msg DeleteFailedMsg) Model {
 		m.confirmPrompt = fmt.Sprintf("Force delete %s? (y/n)", msg.Target)
 		m.confirmForce = true
 		m.overlay = OverlayConfirm
+		successMsg := msg.SuccessMsg
 		m.confirmAction = func() tea.Cmd {
 			return func() tea.Msg {
 				_ = msg.ForceAction()
+				if successMsg != nil {
+					return successMsg
+				}
 				return BranchDeletedMsg{RepoPath: msg.RepoPath}
 			}
 		}
