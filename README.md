@@ -46,19 +46,19 @@ The UI has two panes: repos on the left, content on the right. `tab` switches fo
 |-----|--------|
 | `↑`/`k` | Move selection up |
 | `↓`/`j` | Move selection down |
-| `1`/`2`/`3`/`4` | Switch to worktrees / branches / stashes / history |
+| `1`/`2`/`3`/`4`/`5` | Switch to worktrees / branches / stashes / history / reflog |
 | `←`/`h`/`→`/`l` | Cycle through modes |
-| `enter` | View diff (dirty branch, stash, or commit) |
-| `d` | Delete branch or drop stash — requires destructive mode |
-| `p` | Prune stale worktree — requires destructive mode (branches view) |
+| `enter` | View diff (dirty worktree, dirty branch, stash, commit, or reflog entry) |
+| `d` | Delete worktree/branch or drop stash — requires destructive mode |
+| `p` | Prune stale worktree — requires destructive mode (worktrees view) |
 | `t` | Open terminal at worktree path |
 | `c` | Open VSCode at worktree path |
-| `y` | Copy commit hash to clipboard (history view) |
+| `y` | Copy hash to clipboard (history/reflog view) |
 | `D` | Toggle destructive mode |
 | `tab` | Switch focus to left pane |
 | `q`/`esc` | Close overlay or quit |
 
-The right pane header shows the active mode. Press `1`–`4` or use arrow keys to switch between worktrees, branches, stashes, and history.
+The right pane header shows the active mode. Press `1`–`5` or use arrow keys to switch between worktrees, branches, stashes, history, and reflog.
 
 ### Worktrees view (mode 1)
 
@@ -90,6 +90,10 @@ Browse stashes for the selected repo. Long stash messages wrap to two lines (dat
 ### History view (mode 4)
 
 Browse recent commits (up to 50) for the selected repo. Each row shows the commit hash, author, relative date, and subject. Use `enter` to view the full commit diff, `y` to copy the commit hash to clipboard, and `t`/`c` to open terminal or VSCode at the repo root.
+
+### Reflog view (mode 5)
+
+Browse HEAD reflog entries (up to 50) for the selected repo. Each row shows the abbreviated hash, selector (e.g. `HEAD@{0}`), relative date, and subject. Use `enter` to view the diff for that entry — checkout entries with no tree changes show "No changes at this reflog entry". Use `y` to copy the entry hash to clipboard.
 
 ## Configuration
 
