@@ -1015,27 +1015,6 @@ func TestModel_StaleBranchDeletedMsgIgnored(t *testing.T) {
 	}
 }
 
-func TestModel_WorktreeRemovedMsgTriggersBranchFetch(t *testing.T) {
-	m := model.New(testRepos())
-	_, cmd := update(m, model.WorktreeRemovedMsg{RepoPath: "/dev/alpha"})
-	if cmd == nil {
-		t.Fatal("expected fetchBranches cmd after WorktreeRemovedMsg, got nil")
-	}
-	msg := cmd()
-	if _, ok := msg.(model.BranchResultMsg); !ok {
-		t.Errorf("expected BranchResultMsg, got %T", msg)
-	}
-}
-
-func TestModel_StaleWorktreeRemovedMsgIgnored(t *testing.T) {
-	m := model.New(testRepos())
-	m = selectBravo(m) // selected=bravo
-	_, cmd := update(m, model.WorktreeRemovedMsg{RepoPath: "/dev/alpha"})
-	if cmd != nil {
-		t.Error("expected stale WorktreeRemovedMsg to be ignored (no fetch cmd)")
-	}
-}
-
 func TestModel_StashDroppedMsgTriggersStashFetch(t *testing.T) {
 	m := model.New(testRepos())
 	_, cmd := update(m, model.StashDroppedMsg{RepoPath: "/dev/alpha"})

@@ -581,12 +581,11 @@ func TestModel_DeleteFailedMsgOpensForceConfirm(t *testing.T) {
 	forceActionCalled := false
 	m, _ = update(m, model.DeleteFailedMsg{
 		RepoPath: "/dev/alpha",
-		Target:   "/dev/alpha/feat",
+		Target:   "feat",
 		ForceAction: func() error {
 			forceActionCalled = true
 			return nil
 		},
-		IsWorktree: true,
 	})
 	if m.Overlay() != model.OverlayConfirm {
 		t.Errorf("expected OverlayConfirm after DeleteFailedMsg, got %d", m.Overlay())
@@ -597,7 +596,7 @@ func TestModel_DeleteFailedMsgOpensForceConfirm(t *testing.T) {
 	if !strings.Contains(m.ConfirmPrompt(), "Force delete") {
 		t.Errorf("expected 'Force delete' in prompt, got %q", m.ConfirmPrompt())
 	}
-	if !strings.Contains(m.ConfirmPrompt(), "/dev/alpha/feat") {
+	if !strings.Contains(m.ConfirmPrompt(), "feat") {
 		t.Errorf("expected target in prompt, got %q", m.ConfirmPrompt())
 	}
 	_ = forceActionCalled
@@ -609,7 +608,6 @@ func TestModel_ForceConfirmCancelClearsForce(t *testing.T) {
 		RepoPath:    "/dev/alpha",
 		Target:      "feat",
 		ForceAction: func() error { return nil },
-		IsWorktree:  false,
 	})
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	if m.Overlay() != model.OverlayNone {
@@ -626,7 +624,6 @@ func TestModel_ForceConfirmYExecutesForceAction(t *testing.T) {
 		RepoPath:    "/dev/alpha",
 		Target:      "feat",
 		ForceAction: func() error { return nil },
-		IsWorktree:  false,
 	})
 	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	if m.Overlay() != model.OverlayNone {
@@ -640,25 +637,7 @@ func TestModel_ForceConfirmYExecutesForceAction(t *testing.T) {
 	}
 	msg := cmd()
 	if _, ok := msg.(model.BranchDeletedMsg); !ok {
-		t.Fatalf("expected BranchDeletedMsg from force action (IsWorktree=false), got %T", msg)
-	}
-}
-
-func TestModel_ForceConfirmWorktreeYReturnsWorktreeRemovedMsg(t *testing.T) {
-	m := model.New(testRepos())
-	m, _ = update(m, model.DeleteFailedMsg{
-		RepoPath:    "/dev/alpha",
-		Target:      "/dev/alpha/feat",
-		ForceAction: func() error { return nil },
-		IsWorktree:  true,
-	})
-	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
-	if cmd == nil {
-		t.Fatal("expected cmd, got nil")
-	}
-	msg := cmd()
-	if _, ok := msg.(model.WorktreeRemovedMsg); !ok {
-		t.Fatalf("expected WorktreeRemovedMsg from force worktree action, got %T", msg)
+		t.Fatalf("expected BranchDeletedMsg from force action, got %T", msg)
 	}
 }
 
@@ -714,42 +693,6 @@ func TestModel_StashDropConfirmReturnsStashDroppedMsg(t *testing.T) {
 	msg := cmd()
 	if _, ok := msg.(model.StashDroppedMsg); !ok {
 		t.Errorf("expected StashDroppedMsg, got %T", msg)
-	}
-}
-
-// --- Prune stale worktree ---
-
-func TestModel_PKeyNoOpOnNonStaleWorktree(t *testing.T) {
-	m := modelWithDeletableBranch() // non-worktree branch (not stale)
-	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
-	if m.Overlay() != model.OverlayNone {
-		t.Errorf("expected OverlayNone on non-stale worktree, got %d", m.Overlay())
-	}
-}
-
-func TestModel_PKeyNoOpOnNonWorktreeBranch(t *testing.T) {
-	m := model.New(testRepos())
-	m = inBranchesMode(m)
-	m, _ = update(m, model.BranchResultMsg{
-		RepoPath: "/dev/alpha",
-		Branches: []gitquery.Branch{{Name: "plain"}},
-	})
-	m = enableDestructive(m)
-	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
-	if m.Overlay() != model.OverlayNone {
-		t.Errorf("expected OverlayNone on non-worktree branch, got %d", m.Overlay())
-	}
-}
-
-func TestModel_WorktreePrunedMsgRefreshesBranches(t *testing.T) {
-	m := model.New(testRepos())
-	m, cmd := update(m, model.WorktreePrunedMsg{RepoPath: "/dev/alpha"})
-	if cmd == nil {
-		t.Fatal("expected fetchBranches cmd after WorktreePrunedMsg, got nil")
-	}
-	msg := cmd()
-	if _, ok := msg.(model.BranchResultMsg); !ok {
-		t.Fatalf("expected BranchResultMsg from fetch, got %T", msg)
 	}
 }
 
