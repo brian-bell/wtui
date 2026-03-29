@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/brian-bell/wtui/gitquery"
 	"github.com/brian-bell/wtui/scanner"
 )
@@ -164,14 +166,102 @@ func TestRepoList_ScrollsWhenSelectionExceedsHeight(t *testing.T) {
 		{Path: "/d", DisplayName: "delta"},
 		{Path: "/e", DisplayName: "echo"},
 	}
-	// Height of 3 means only 3 visible at a time
-	lines := renderRepoList(repos, 4, LeftPaneWidth-2, 3) // selected=4 (echo), height=3
+	// Height of 3 means only 3 visible at a time; scroll=2 shows repos 2-4
+	lines := renderRepoList(repos, 4, 2, LeftPaneWidth-2, 3)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "echo") {
 		t.Error("selected item 'echo' should be visible")
 	}
 	if strings.Contains(joined, "alpha") {
 		t.Error("'alpha' should be scrolled off the top")
+	}
+}
+
+func TestRepoList_TruncatesLongNames(t *testing.T) {
+	width := LeftPaneWidth - 2
+	repos := []scanner.Repo{
+		{Path: "/a", DisplayName: "this-is-a-very-long-repository-name-that-exceeds-width"},
+	}
+	lines := renderRepoList(repos, 0, 0, width, 3)
+	for i, line := range lines {
+		if lipgloss.Width(line) > width {
+			t.Errorf("line %d width %d exceeds pane width %d", i, lipgloss.Width(line), width)
+		}
+	}
+}
+
+func TestStashPane_LongMessageAlwaysShowsTwoLines(t *testing.T) {
+	width := 50
+	longMsg := "this is a very long stash message that should wrap to a second line always"
+	stashes := []gitquery.Stash{
+		{Index: 0, Date: "2026-03-18 10:00:00", Message: longMsg},
+	}
+	// Not selected (selected=-1): should still show 2 lines for the long message
+	lines := renderStashPane(stashes, -1, 0, width, 10)
+	// Count non-empty lines
+	nonEmpty := 0
+	for _, l := range lines {
+		if strings.TrimSpace(l) != "" {
+			nonEmpty++
+		}
+	}
+	if nonEmpty < 2 {
+		t.Errorf("expected at least 2 non-empty lines for long stash message, got %d", nonEmpty)
+	}
+}
+
+func TestStashPane_ShortMessageShowsOneLine(t *testing.T) {
+	width := 50
+	stashes := []gitquery.Stash{
+		{Index: 0, Date: "2026-03-18 10:00:00", Message: "short"},
+	}
+	lines := renderStashPane(stashes, -1, 0, width, 10)
+	nonEmpty := 0
+	for _, l := range lines {
+		if strings.TrimSpace(l) != "" {
+			nonEmpty++
+		}
+	}
+	if nonEmpty != 1 {
+		t.Errorf("expected 1 non-empty line for short stash message, got %d", nonEmpty)
+	}
+}
+
+func TestStashPane_SelectedLongMessageHighlightsBothLines(t *testing.T) {
+	width := 50
+	// Message wraps to 2 lines but the remainder is short, so selected
+	// (padded to full width) and unselected (unpadded) must differ.
+	longMsg := "this is a long stash message that wraps ok"
+	stashes := []gitquery.Stash{
+		{Index: 0, Date: "2026-03-18 10:00:00", Message: longMsg},
+	}
+	// Render with stash selected vs not selected
+	selLines := renderStashPane(stashes, 0, 0, width, 10)
+	unselLines := renderStashPane(stashes, -1, 0, width, 10)
+
+	// The continuation line (index 1) should differ between selected and
+	// unselected renders — stashSelStyle.Width(width) pads the selected
+	// continuation to full width, while the unselected one is unpadded.
+	if selLines[1] == unselLines[1] {
+		t.Error("continuation line should be styled differently when stash is selected")
+	}
+}
+
+func TestStashPane_ScrollOffset(t *testing.T) {
+	width := 50
+	stashes := []gitquery.Stash{
+		{Index: 0, Date: "2026-03-18", Message: "first"},
+		{Index: 1, Date: "2026-03-17", Message: "second"},
+		{Index: 2, Date: "2026-03-16", Message: "third"},
+	}
+	// scroll=1 should skip the first stash line
+	lines := renderStashPane(stashes, 1, 1, width, 3)
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "first") {
+		t.Error("'first' should be scrolled off the top")
+	}
+	if !strings.Contains(joined, "second") {
+		t.Error("'second' should be visible")
 	}
 }
 

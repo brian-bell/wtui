@@ -71,7 +71,7 @@ Worktree branches are annotated with `[root]` (repo root) or `[<path>]` (additio
 
 ### Stashes view (mode 2)
 
-Browse stashes for the selected repo. Use `↑`/`↓` to select a stash, `enter` to view its diff in a full-screen overlay, `d` to drop the selected stash (with confirmation, requires destructive mode).
+Browse stashes for the selected repo. Long stash messages wrap to two lines (date + message start, then indented continuation). Use `↑`/`↓` to select a stash, `enter` to view its diff in a full-screen overlay, `d` to drop the selected stash (with confirmation, requires destructive mode). The stash list scrolls when entries exceed the pane height.
 
 ## Configuration
 
