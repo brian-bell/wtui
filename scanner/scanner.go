@@ -92,6 +92,6 @@ func Scan(opts ScanOptions) ([]Repo, error) {
 }
 
 func isRepo(path string) bool {
-	_, err := os.Stat(filepath.Join(path, ".git"))
-	return err == nil
+	info, err := os.Stat(filepath.Join(path, ".git"))
+	return err == nil && info.IsDir()
 }

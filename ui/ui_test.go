@@ -5,12 +5,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/brian-bell/wtui/gitquery"
 	"github.com/brian-bell/wtui/scanner"
 )
 
 func TestStatusBar_Mode1ContainsIndicatorLegend(t *testing.T) {
-	bar := RenderStatusBar(120, 1, 0, 1, true)
+	bar := RenderStatusBar(120, 1, 0, 1, true, false)
 	for _, legend := range []string{"✔ clean", "● ahead/behind", "● dirty", "● no upstream"} {
 		if !strings.Contains(bar, legend) {
 			t.Errorf("mode 1 status bar should contain legend %q", legend)
@@ -19,7 +21,7 @@ func TestStatusBar_Mode1ContainsIndicatorLegend(t *testing.T) {
 }
 
 func TestStatusBar_IndicatorLegendSpacing(t *testing.T) {
-	bar := RenderStatusBar(120, 1, 0, 1, true)
+	bar := RenderStatusBar(120, 1, 0, 1, true, false)
 	for _, pair := range [][2]string{
 		{"clean", "●"},
 	} {
@@ -37,14 +39,14 @@ func TestStatusBar_IndicatorLegendSpacing(t *testing.T) {
 }
 
 func TestStatusBar_Mode2OmitsIndicatorLegend(t *testing.T) {
-	bar := RenderStatusBar(120, 2, 0, 1, true)
+	bar := RenderStatusBar(120, 2, 0, 1, true, false)
 	if strings.Contains(bar, "clean") {
 		t.Error("mode 2 status bar should not contain indicator legend")
 	}
 }
 
 func TestStatusBar_PipeSeparatesLegendAndHints(t *testing.T) {
-	bar := RenderStatusBar(120, 1, 0, 1, true)
+	bar := RenderStatusBar(120, 1, 0, 1, true, false)
 	upstreamIdx := strings.Index(bar, "no upstream")
 	tabIdx := strings.Index(bar, "tab: pane")
 	if upstreamIdx == -1 || tabIdx == -1 {
@@ -57,7 +59,7 @@ func TestStatusBar_PipeSeparatesLegendAndHints(t *testing.T) {
 }
 
 func TestStatusBar_TabAndQuitBeforeOtherHints(t *testing.T) {
-	bar := RenderStatusBar(120, 1, 0, 1, true)
+	bar := RenderStatusBar(120, 1, 0, 1, true, false)
 	tabIdx := strings.Index(bar, "tab: pane")
 	tIdx := strings.Index(bar, "t: terminal")
 	if tabIdx == -1 || tIdx == -1 {
@@ -73,7 +75,7 @@ func TestStatusBar_TabAndQuitBeforeOtherHints(t *testing.T) {
 }
 
 func TestStatusBar_ActionHintsHiddenWhenLeftPaneActive(t *testing.T) {
-	bar := RenderStatusBar(120, 1, 0, 0, true) // activePane=0 (left), destructive=true
+	bar := RenderStatusBar(120, 1, 0, 0, true, false) // activePane=0 (left), destructive=true
 	for _, hint := range []string{"t: terminal", "c: code", "d: delete"} {
 		if strings.Contains(bar, hint) {
 			t.Errorf("hint %q should be hidden when left pane is active", hint)
@@ -88,7 +90,7 @@ func TestStatusBar_ActionHintsHiddenWhenLeftPaneActive(t *testing.T) {
 }
 
 func TestStatusBar_ActionHintsShownWhenRightPaneActive(t *testing.T) {
-	bar := RenderStatusBar(120, 1, 0, 1, true) // activePane=1 (right)
+	bar := RenderStatusBar(120, 1, 0, 1, true, false) // activePane=1 (right)
 	for _, hint := range []string{"t: terminal", "c: code", "d: delete"} {
 		if !strings.Contains(bar, hint) {
 			t.Errorf("hint %q should be shown when right pane is active", hint)
@@ -97,7 +99,7 @@ func TestStatusBar_ActionHintsShownWhenRightPaneActive(t *testing.T) {
 }
 
 func TestStatusBar_KeyHintSpacingIs2(t *testing.T) {
-	bar := RenderStatusBar(120, 1, 0, 1, true)
+	bar := RenderStatusBar(120, 1, 0, 1, true, false)
 	for _, pair := range [][2]string{
 		{"tab: pane", "q/esc: quit"},
 		{"t: terminal", "c: code"},
@@ -164,14 +166,102 @@ func TestRepoList_ScrollsWhenSelectionExceedsHeight(t *testing.T) {
 		{Path: "/d", DisplayName: "delta"},
 		{Path: "/e", DisplayName: "echo"},
 	}
-	// Height of 3 means only 3 visible at a time
-	lines := renderRepoList(repos, 4, LeftPaneWidth-2, 3) // selected=4 (echo), height=3
+	// Height of 3 means only 3 visible at a time; scroll=2 shows repos 2-4
+	lines := renderRepoList(repos, 4, 2, LeftPaneWidth-2, 3)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "echo") {
 		t.Error("selected item 'echo' should be visible")
 	}
 	if strings.Contains(joined, "alpha") {
 		t.Error("'alpha' should be scrolled off the top")
+	}
+}
+
+func TestRepoList_TruncatesLongNames(t *testing.T) {
+	width := LeftPaneWidth - 2
+	repos := []scanner.Repo{
+		{Path: "/a", DisplayName: "this-is-a-very-long-repository-name-that-exceeds-width"},
+	}
+	lines := renderRepoList(repos, 0, 0, width, 3)
+	for i, line := range lines {
+		if lipgloss.Width(line) > width {
+			t.Errorf("line %d width %d exceeds pane width %d", i, lipgloss.Width(line), width)
+		}
+	}
+}
+
+func TestStashPane_LongMessageAlwaysShowsTwoLines(t *testing.T) {
+	width := 50
+	longMsg := "this is a very long stash message that should wrap to a second line always"
+	stashes := []gitquery.Stash{
+		{Index: 0, Date: "2026-03-18 10:00:00", Message: longMsg},
+	}
+	// Not selected (selected=-1): should still show 2 lines for the long message
+	lines := renderStashPane(stashes, -1, 0, width, 10)
+	// Count non-empty lines
+	nonEmpty := 0
+	for _, l := range lines {
+		if strings.TrimSpace(l) != "" {
+			nonEmpty++
+		}
+	}
+	if nonEmpty < 2 {
+		t.Errorf("expected at least 2 non-empty lines for long stash message, got %d", nonEmpty)
+	}
+}
+
+func TestStashPane_ShortMessageShowsOneLine(t *testing.T) {
+	width := 50
+	stashes := []gitquery.Stash{
+		{Index: 0, Date: "2026-03-18 10:00:00", Message: "short"},
+	}
+	lines := renderStashPane(stashes, -1, 0, width, 10)
+	nonEmpty := 0
+	for _, l := range lines {
+		if strings.TrimSpace(l) != "" {
+			nonEmpty++
+		}
+	}
+	if nonEmpty != 1 {
+		t.Errorf("expected 1 non-empty line for short stash message, got %d", nonEmpty)
+	}
+}
+
+func TestStashPane_SelectedLongMessageHighlightsBothLines(t *testing.T) {
+	width := 50
+	// Message wraps to 2 lines but the remainder is short, so selected
+	// (padded to full width) and unselected (unpadded) must differ.
+	longMsg := "this is a long stash message that wraps ok"
+	stashes := []gitquery.Stash{
+		{Index: 0, Date: "2026-03-18 10:00:00", Message: longMsg},
+	}
+	// Render with stash selected vs not selected
+	selLines := renderStashPane(stashes, 0, 0, width, 10)
+	unselLines := renderStashPane(stashes, -1, 0, width, 10)
+
+	// The continuation line (index 1) should differ between selected and
+	// unselected renders — stashSelStyle.Width(width) pads the selected
+	// continuation to full width, while the unselected one is unpadded.
+	if selLines[1] == unselLines[1] {
+		t.Error("continuation line should be styled differently when stash is selected")
+	}
+}
+
+func TestStashPane_ScrollOffset(t *testing.T) {
+	width := 50
+	stashes := []gitquery.Stash{
+		{Index: 0, Date: "2026-03-18", Message: "first"},
+		{Index: 1, Date: "2026-03-17", Message: "second"},
+		{Index: 2, Date: "2026-03-16", Message: "third"},
+	}
+	// scroll=1 should skip the first stash line
+	lines := renderStashPane(stashes, 1, 1, width, 3)
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "first") {
+		t.Error("'first' should be scrolled off the top")
+	}
+	if !strings.Contains(joined, "second") {
+		t.Error("'second' should be visible")
 	}
 }
 
@@ -319,6 +409,23 @@ func TestBranchPane_DetachedWorktreeRow(t *testing.T) {
 	}
 	if !strings.Contains(joined, "[/tmp/wt-detached]") {
 		t.Error("detached worktree should show its path annotation")
+	}
+}
+
+func TestBranchPane_StaleWorktreeShowsStaleIndicator(t *testing.T) {
+	rows := []gitquery.BranchRow{
+		{Branch: gitquery.Branch{Name: "stale-feat", HasUpstream: true, IsWorktree: true}, WorktreePath: "/dev/gone", Stale: true},
+	}
+	lines := renderBranchPane(rows, 60, 10)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "✗") {
+		t.Error("stale worktree should show ✗ indicator")
+	}
+	if strings.Contains(joined, "✔") {
+		t.Error("stale worktree should NOT show ✔ indicator")
+	}
+	if !strings.Contains(joined, "stale") {
+		t.Error("stale worktree should show 'stale' label")
 	}
 }
 
@@ -522,8 +629,29 @@ func TestRender_ForceConfirmDialogShowsPrompt(t *testing.T) {
 	}
 }
 
+func TestStatusBar_PruneHintShownWhenStale(t *testing.T) {
+	bar := RenderStatusBar(120, 1, 0, 1, true, true)
+	if !strings.Contains(bar, "p: prune") {
+		t.Errorf("expected 'p: prune' hint when stale worktree selected, got %q", bar)
+	}
+}
+
+func TestStatusBar_PruneHintHiddenWhenNotStale(t *testing.T) {
+	bar := RenderStatusBar(120, 1, 0, 1, true, false)
+	if strings.Contains(bar, "p: prune") {
+		t.Error("'p: prune' should not appear when no stale worktree selected")
+	}
+}
+
+func TestStatusBar_PruneHintHiddenWithoutDestructive(t *testing.T) {
+	bar := RenderStatusBar(120, 1, 0, 1, false, true)
+	if strings.Contains(bar, "p: prune") {
+		t.Error("'p: prune' should not appear without destructive mode")
+	}
+}
+
 func TestStatusBar_Mode2HintsSpacing(t *testing.T) {
-	bar := RenderStatusBar(120, 2, 0, 1, true)
+	bar := RenderStatusBar(120, 2, 0, 1, true, false)
 	for _, pair := range [][2]string{
 		{"tab: pane", "q/esc: quit"},
 		{"↑/↓ select", "enter: diff"},

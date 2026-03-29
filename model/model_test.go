@@ -373,6 +373,168 @@ func TestModel_BranchScrollFollowsCursor(t *testing.T) {
 	}
 }
 
+func TestModel_RepoScrollFollowsCursor(t *testing.T) {
+	// Create 10 repos, terminal height only shows 3
+	repos := make([]scanner.Repo, 10)
+	for i := range repos {
+		repos[i] = scanner.Repo{Path: fmt.Sprintf("/dev/repo-%d", i), DisplayName: fmt.Sprintf("repo-%d", i)}
+	}
+	contentHeight := 3
+	m := model.New(repos)
+	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: ui.RepoContentOverhead + contentHeight})
+
+	// Cursor starts at 0, scroll at 0
+	if m.RepoScroll() != 0 {
+		t.Errorf("expected scroll 0 at start, got %d", m.RepoScroll())
+	}
+
+	// Move cursor down past the viewport
+	for i := 0; i < 9; i++ {
+		m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	if m.Selected() != 9 {
+		t.Errorf("expected cursor at 9, got %d", m.Selected())
+	}
+	// Scroll should have advanced to show cursor
+	if m.RepoScroll() == 0 {
+		t.Error("expected scroll to advance when cursor moves past viewport")
+	}
+	// Cursor must be within [scroll, scroll+contentHeight)
+	if m.Selected() < m.RepoScroll() || m.Selected() >= m.RepoScroll()+contentHeight {
+		t.Errorf("cursor %d not in scroll viewport [%d, %d)", m.Selected(), m.RepoScroll(), m.RepoScroll()+contentHeight)
+	}
+
+	// Move back up to 0
+	for i := 0; i < 9; i++ {
+		m, _ = update(m, tea.KeyMsg{Type: tea.KeyUp})
+	}
+	if m.Selected() != 0 {
+		t.Errorf("expected cursor back at 0, got %d", m.Selected())
+	}
+	if m.RepoScroll() != 0 {
+		t.Errorf("expected scroll back to 0, got %d", m.RepoScroll())
+	}
+}
+
+func TestModel_RepoScrollWrapsFromTopToBottom(t *testing.T) {
+	repos := make([]scanner.Repo, 10)
+	for i := range repos {
+		repos[i] = scanner.Repo{Path: fmt.Sprintf("/dev/repo-%d", i), DisplayName: fmt.Sprintf("repo-%d", i)}
+	}
+	contentHeight := 3
+	m := model.New(repos)
+	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: ui.RepoContentOverhead + contentHeight})
+
+	// Press Up from index 0 — should wrap to last repo
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyUp})
+	if m.Selected() != 9 {
+		t.Errorf("expected cursor at 9 after wrap, got %d", m.Selected())
+	}
+	// Scroll should position last repo in viewport
+	if m.Selected() < m.RepoScroll() || m.Selected() >= m.RepoScroll()+contentHeight {
+		t.Errorf("cursor %d not in scroll viewport [%d, %d)", m.Selected(), m.RepoScroll(), m.RepoScroll()+contentHeight)
+	}
+}
+
+func TestModel_RepoScrollWrapsFromBottomToTop(t *testing.T) {
+	repos := make([]scanner.Repo, 10)
+	for i := range repos {
+		repos[i] = scanner.Repo{Path: fmt.Sprintf("/dev/repo-%d", i), DisplayName: fmt.Sprintf("repo-%d", i)}
+	}
+	contentHeight := 3
+	m := model.New(repos)
+	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: ui.RepoContentOverhead + contentHeight})
+
+	// Navigate to last repo
+	for i := 0; i < 9; i++ {
+		m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	// Press Down — should wrap to first repo
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.Selected() != 0 {
+		t.Errorf("expected cursor at 0 after wrap, got %d", m.Selected())
+	}
+	if m.RepoScroll() != 0 {
+		t.Errorf("expected scroll at 0 after wrap to top, got %d", m.RepoScroll())
+	}
+}
+
+func TestModel_StashScrollFollowsCursor(t *testing.T) {
+	// Create 10 stashes, terminal height only shows 3 content lines
+	stashes := make([]gitquery.Stash, 10)
+	for i := range stashes {
+		stashes[i] = gitquery.Stash{Index: i, Date: "2026-03-18", Message: fmt.Sprintf("stash-%d", i)}
+	}
+	contentHeight := 3
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: ui.BranchContentOverhead + contentHeight})
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m, _ = update(m, model.StashResultMsg{RepoPath: "/dev/alpha", Stashes: stashes})
+
+	if m.StashScroll() != 0 {
+		t.Errorf("expected scroll 0 at start, got %d", m.StashScroll())
+	}
+
+	// Move cursor down past the viewport
+	for i := 0; i < 9; i++ {
+		m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	if m.StashSelected() != 9 {
+		t.Errorf("expected cursor at 9, got %d", m.StashSelected())
+	}
+	if m.StashScroll() == 0 {
+		t.Error("expected scroll to advance when cursor moves past viewport")
+	}
+	// Compute the visual line of the selected stash (sum of line counts for all preceding stashes)
+	visLine := 0
+	for i, s := range stashes {
+		if i == m.StashSelected() {
+			break
+		}
+		visLine += ui.StashLineCount(s.Message, 80-ui.LeftPaneWidth-2)
+	}
+	if visLine < m.StashScroll() || visLine >= m.StashScroll()+contentHeight {
+		t.Errorf("visual line %d not in scroll viewport [%d, %d)", visLine, m.StashScroll(), m.StashScroll()+contentHeight)
+	}
+
+	// Move back up to 0
+	for i := 0; i < 9; i++ {
+		m, _ = update(m, tea.KeyMsg{Type: tea.KeyUp})
+	}
+	if m.StashScroll() != 0 {
+		t.Errorf("expected scroll back to 0, got %d", m.StashScroll())
+	}
+}
+
+func TestModel_StashScrollAccountsForLongMessages(t *testing.T) {
+	// Stashes with long messages take 2 lines each
+	longMsg := "this is a very long stash message that will definitely wrap to two lines in a narrow pane"
+	stashes := make([]gitquery.Stash, 5)
+	for i := range stashes {
+		stashes[i] = gitquery.Stash{Index: i, Date: "2026-03-18", Message: longMsg}
+	}
+	// Width 50: prefix is 15 chars, message gets 35 chars, longMsg overflows → 2 lines each
+	// 3 content lines → only ~1.5 stashes visible at a time
+	contentHeight := 3
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 50 + ui.LeftPaneWidth + 2, Height: ui.BranchContentOverhead + contentHeight})
+	m = inRightPane(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m, _ = update(m, model.StashResultMsg{RepoPath: "/dev/alpha", Stashes: stashes})
+
+	// Move to stash 2 (each takes 2 lines, so stash 2 starts at visual line 4)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.StashSelected() != 2 {
+		t.Errorf("expected cursor at 2, got %d", m.StashSelected())
+	}
+	// Scroll should have advanced since stash 2 starts at line 4, viewport is only 3 lines
+	if m.StashScroll() == 0 {
+		t.Error("expected scroll to advance for long-message stashes")
+	}
+}
+
 // --- Mode switching ---
 
 func TestModel_ModeSwitchOnKeyPress(t *testing.T) {

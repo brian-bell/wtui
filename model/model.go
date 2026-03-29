@@ -65,11 +65,16 @@ type StashDroppedMsg struct {
 	RepoPath string
 }
 
+type WorktreePrunedMsg struct {
+	RepoPath string
+}
+
 type DeleteFailedMsg struct {
 	RepoPath    string
 	Target      string       // worktree path or branch name
 	ForceAction func() error // the --force variant to call
 	IsWorktree  bool
+	BranchName  string // branch to delete after worktree removal
 }
 
 // Model is the bubbletea application model.
@@ -90,6 +95,8 @@ type Model struct {
 	confirmAction  func() tea.Cmd
 	confirmForce   bool
 	branchScroll   int
+	repoScroll     int
+	stashScroll    int
 	activePane     int // 0=left (repos), 1=right (content)
 	destructive    bool
 }
@@ -113,6 +120,8 @@ func (m Model) OverlayScroll() int         { return m.overlayScroll }
 func (m Model) ConfirmPrompt() string      { return m.confirmPrompt }
 func (m Model) ConfirmForce() bool         { return m.confirmForce }
 func (m Model) BranchScroll() int          { return m.branchScroll }
+func (m Model) RepoScroll() int            { return m.repoScroll }
+func (m Model) StashScroll() int           { return m.stashScroll }
 func (m Model) ActivePane() int            { return m.activePane }
 func (m Model) Destructive() bool          { return m.destructive }
 
@@ -137,8 +146,11 @@ func (m Model) View() string {
 		ConfirmPrompt:  m.confirmPrompt,
 		ConfirmForce:   m.confirmForce,
 		BranchScroll:   m.branchScroll,
+		RepoScroll:     m.repoScroll,
+		StashScroll:    m.stashScroll,
 		ActivePane:     m.activePane,
 		Destructive:    m.destructive,
+		StaleSelected:  m.isSelectedStale(),
 	})
 }
 
@@ -151,6 +163,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m = m.ensureRepoVisible()
+		m = m.ensureStashVisible()
 	case BranchResultMsg:
 		return m.handleBranchResult(msg), nil
 	case StashResultMsg:
@@ -165,6 +179,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleWorktreeRemoved(msg)
 	case BranchDeletedMsg:
 		return m.handleBranchDeleted(msg)
+	case WorktreePrunedMsg:
+		return m.handleWorktreePruned(msg)
 	case DeleteFailedMsg:
 		return m.handleDeleteFailed(msg), nil
 	}
@@ -220,6 +236,7 @@ func (m Model) handleLeftPaneKey(key string) (tea.Model, tea.Cmd) {
 			} else {
 				m.selected = len(m.repos) - 1
 			}
+			m = m.ensureRepoVisible()
 			m = m.resetRightPaneCursors()
 			return m, m.fetchForMode()
 		}
@@ -230,6 +247,7 @@ func (m Model) handleLeftPaneKey(key string) (tea.Model, tea.Cmd) {
 			} else {
 				m.selected = 0
 			}
+			m = m.ensureRepoVisible()
 			m = m.resetRightPaneCursors()
 			return m, m.fetchForMode()
 		}
@@ -294,6 +312,8 @@ func (m Model) handleRightPaneKey(key string) (tea.Model, tea.Cmd) {
 		return m.handleEnter()
 	case "d":
 		return m.handleDelete()
+	case "p":
+		return m.handlePrune()
 	case "t":
 		return m.handleOpenTerminal()
 	case "c":
@@ -322,6 +342,7 @@ func (m Model) handleCursorUp() (tea.Model, tea.Cmd) {
 		} else {
 			m.stashSelected = len(m.stashes) - 1
 		}
+		m = m.ensureStashVisible()
 	}
 	return m, nil
 }
@@ -342,6 +363,7 @@ func (m Model) handleCursorDown() (tea.Model, tea.Cmd) {
 		} else {
 			m.stashSelected = 0
 		}
+		m = m.ensureStashVisible()
 	}
 	return m, nil
 }
@@ -370,6 +392,30 @@ func (m Model) handleDelete() (tea.Model, tea.Cmd) {
 	if m.mode == ModeBranches && len(m.repos) > 0 {
 		return m.confirmBranchDelete()
 	}
+	return m, nil
+}
+
+func (m Model) handlePrune() (tea.Model, tea.Cmd) {
+	if !m.destructive {
+		return m, nil
+	}
+	if m.mode != ModeBranches || len(m.repos) == 0 {
+		return m, nil
+	}
+	row, ok := m.selectedRow()
+	if !ok || !row.Stale {
+		return m, nil
+	}
+	repoPath := m.repos[m.selected].Path
+	worktreePath := row.WorktreePath
+	m.confirmPrompt = fmt.Sprintf("Prune stale worktree %s? (y/n)", worktreePath)
+	m.confirmAction = func() tea.Cmd {
+		return func() tea.Msg {
+			_ = actions.PruneWorktree(repoPath)
+			return WorktreePrunedMsg{RepoPath: repoPath}
+		}
+	}
+	m.overlay = OverlayConfirm
 	return m, nil
 }
 
@@ -418,17 +464,26 @@ func (m Model) confirmBranchDelete() (tea.Model, tea.Cmd) {
 
 	if row.WorktreePath != "" {
 		worktreePath := row.WorktreePath
+		branchName := row.Branch.Name
 		m.confirmPrompt = fmt.Sprintf("Remove worktree %s? (y/n)", worktreePath)
 		m.confirmAction = func() tea.Cmd {
 			return func() tea.Msg {
 				if err := actions.RemoveWorktree(repoPath, worktreePath); err != nil {
 					return DeleteFailedMsg{
-						RepoPath:    repoPath,
-						Target:      worktreePath,
-						ForceAction: func() error { return actions.ForceRemoveWorktree(repoPath, worktreePath) },
-						IsWorktree:  true,
+						RepoPath:   repoPath,
+						Target:     worktreePath,
+						BranchName: branchName,
+						ForceAction: func() error {
+							if err := actions.ForceRemoveWorktree(repoPath, worktreePath); err != nil {
+								return err
+							}
+							_ = actions.ForceDeleteBranch(repoPath, branchName)
+							return nil
+						},
+						IsWorktree: true,
 					}
 				}
+				_ = actions.ForceDeleteBranch(repoPath, branchName)
 				return WorktreeRemovedMsg{RepoPath: repoPath}
 			}
 		}
@@ -464,6 +519,7 @@ func (m Model) resetRightPaneCursors() Model {
 	m.branchSelected = 0
 	m.stashSelected = 0
 	m.branchScroll = 0
+	m.stashScroll = 0
 	m.rows = nil
 	m.stashes = nil
 	return m
@@ -519,6 +575,13 @@ func (m Model) handleStashDropped(msg StashDroppedMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleWorktreeRemoved(msg WorktreeRemovedMsg) (tea.Model, tea.Cmd) {
+	if m.isCurrentRepo(msg.RepoPath) {
+		return m, m.fetchBranches()
+	}
+	return m, nil
+}
+
+func (m Model) handleWorktreePruned(msg WorktreePrunedMsg) (tea.Model, tea.Cmd) {
 	if m.isCurrentRepo(msg.RepoPath) {
 		return m, m.fetchBranches()
 	}
@@ -631,9 +694,50 @@ func (m Model) selectedRow() (gitquery.BranchRow, bool) {
 	return m.rows[m.branchSelected], true
 }
 
+func (m Model) isSelectedStale() bool {
+	row, ok := m.selectedRow()
+	return ok && row.Stale
+}
+
 func (m Model) isSelectedBranchDirtyWorktree() bool {
 	row, ok := m.selectedRow()
 	return ok && row.Branch.Dirty && row.Branch.IsWorktree
+}
+
+func (m Model) ensureStashVisible() Model {
+	contentHeight := m.height - ui.StashContentOverhead
+	if contentHeight <= 0 {
+		contentHeight = 1
+	}
+	rightContentWidth := m.width - ui.LeftPaneWidth - 2
+	line := 0
+	for i, s := range m.stashes {
+		if i == m.stashSelected {
+			break
+		}
+		line += ui.StashLineCount(s.Message, rightContentWidth)
+	}
+	if m.stashScroll > line {
+		m.stashScroll = line
+	}
+	if line >= m.stashScroll+contentHeight {
+		m.stashScroll = line - contentHeight + 1
+	}
+	return m
+}
+
+func (m Model) ensureRepoVisible() Model {
+	contentHeight := m.height - ui.RepoContentOverhead
+	if contentHeight <= 0 {
+		contentHeight = 1
+	}
+	if m.repoScroll > m.selected {
+		m.repoScroll = m.selected
+	}
+	if m.selected >= m.repoScroll+contentHeight {
+		m.repoScroll = m.selected - contentHeight + 1
+	}
+	return m
 }
 
 func (m Model) ensureBranchVisible() Model {

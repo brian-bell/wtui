@@ -131,10 +131,10 @@ func TestScan_RespectsDepthLimit(t *testing.T) {
 	}
 }
 
-func TestScan_GitFileAlsoDiscovered(t *testing.T) {
+func TestScan_GitFileWorktreeExcluded(t *testing.T) {
 	root := t.TempDir()
 
-	// .git as a file (worktree marker) instead of directory
+	// .git as a file (worktree marker) should NOT be discovered as a repo
 	repoDir := filepath.Join(root, "wt-repo")
 	os.MkdirAll(repoDir, 0o755)
 	os.WriteFile(filepath.Join(repoDir, ".git"), []byte("gitdir: /some/path"), 0o644)
@@ -143,10 +143,7 @@ func TestScan_GitFileAlsoDiscovered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(repos) != 1 {
-		t.Fatalf("expected 1 repo, got %d", len(repos))
-	}
-	if repos[0].DisplayName != "wt-repo" {
-		t.Errorf("expected %q, got %q", "wt-repo", repos[0].DisplayName)
+	if len(repos) != 0 {
+		t.Fatalf("expected 0 repos (worktree marker excluded), got %d", len(repos))
 	}
 }
