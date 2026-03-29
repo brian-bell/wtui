@@ -335,3 +335,79 @@ func TestModel_ViewWorktreesModeShowsWorktreeContent(t *testing.T) {
 		t.Error("view should contain '[root]' annotation for main worktree")
 	}
 }
+
+func TestModel_ViewWorktreesDirtyShowsDiffHint(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	m = inRightPane(m)
+	wts := []gitquery.Worktree{
+		{Path: "/dev/alpha", BranchName: "main", IsMain: true, Dirty: true, FilesChanged: 2},
+	}
+	m, _ = update(m, model.WorktreeResultMsg{RepoPath: "/dev/alpha", Worktrees: wts})
+
+	view := m.View()
+	for _, hint := range []string{"enter: diff", "t: terminal", "c: code"} {
+		if !strings.Contains(view, hint) {
+			t.Errorf("view should show %q for dirty worktree", hint)
+		}
+	}
+}
+
+func TestModel_ViewWorktreesCleanHidesEnterDiff(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	m = inRightPane(m)
+	wts := []gitquery.Worktree{
+		{Path: "/dev/alpha", BranchName: "main", IsMain: true},
+	}
+	m, _ = update(m, model.WorktreeResultMsg{RepoPath: "/dev/alpha", Worktrees: wts})
+
+	view := m.View()
+	if strings.Contains(view, "enter: diff") {
+		t.Error("view should NOT show 'enter: diff' for clean worktree")
+	}
+	if !strings.Contains(view, "t: terminal") {
+		t.Error("view should show 't: terminal' for clean worktree")
+	}
+}
+
+func TestModel_ViewWorktreesStaleHidesAllActions(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	m = inRightPane(m)
+	wts := []gitquery.Worktree{
+		{Path: "/dev/alpha-gone", BranchName: "gone", Stale: true},
+	}
+	m, _ = update(m, model.WorktreeResultMsg{RepoPath: "/dev/alpha", Worktrees: wts})
+
+	view := m.View()
+	for _, hint := range []string{"enter: diff", "t: terminal", "c: code"} {
+		if strings.Contains(view, hint) {
+			t.Errorf("view should NOT show %q for stale worktree", hint)
+		}
+	}
+}
+
+func TestModel_ViewWorktreeDiffOverlayShowsDiff(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = inRightPane(m)
+	wts := []gitquery.Worktree{
+		{Path: "/dev/alpha", BranchName: "main", IsMain: true, Dirty: true, FilesChanged: 1},
+	}
+	m, _ = update(m, model.WorktreeResultMsg{RepoPath: "/dev/alpha", Worktrees: wts})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m, _ = update(m, model.WorktreeDiffResultMsg{
+		RepoPath:     "/dev/alpha",
+		WorktreePath: "/dev/alpha",
+		Diff:         "diff --git a/f.txt\n--- a/f.txt\n+++ b/f.txt",
+	})
+
+	view := m.View()
+	if !strings.Contains(view, "diff --git") {
+		t.Error("overlay should show diff content")
+	}
+	if !strings.Contains(view, "esc") {
+		t.Error("overlay should show esc hint")
+	}
+}

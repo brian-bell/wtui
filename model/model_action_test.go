@@ -10,6 +10,197 @@ import (
 	"github.com/brian-bell/wtui/model"
 )
 
+// --- Worktree diff (enter key in ModeWorktrees) ---
+
+func TestModel_EnterOnDirtyWorktreeOpensDiffOverlay(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	wts := []gitquery.Worktree{
+		{Path: "/dev/alpha", BranchName: "main", IsMain: true, Dirty: true, FilesChanged: 3},
+		{Path: "/dev/alpha-feat", BranchName: "feat"},
+	}
+	m, _ = update(m, model.WorktreeResultMsg{RepoPath: "/dev/alpha", Worktrees: wts})
+
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.Overlay() != model.OverlayWorktreeDiff {
+		t.Errorf("expected OverlayWorktreeDiff, got %d", m.Overlay())
+	}
+	if cmd == nil {
+		t.Fatal("expected fetchWorktreeDiff cmd, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.WorktreeDiffResultMsg); !ok {
+		t.Errorf("expected WorktreeDiffResultMsg, got %T", msg)
+	}
+}
+
+func TestModel_EnterOnCleanWorktreeIsNoOp(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	wts := []gitquery.Worktree{
+		{Path: "/dev/alpha", BranchName: "main", IsMain: true},
+	}
+	m, _ = update(m, model.WorktreeResultMsg{RepoPath: "/dev/alpha", Worktrees: wts})
+
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.Overlay() != model.OverlayNone {
+		t.Errorf("expected OverlayNone for clean worktree, got %d", m.Overlay())
+	}
+	if cmd != nil {
+		t.Error("expected nil cmd for clean worktree")
+	}
+}
+
+func TestModel_EnterOnStaleWorktreeIsNoOp(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	wts := []gitquery.Worktree{
+		{Path: "/dev/alpha-gone", BranchName: "gone", Stale: true, Dirty: true},
+	}
+	m, _ = update(m, model.WorktreeResultMsg{RepoPath: "/dev/alpha", Worktrees: wts})
+
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.Overlay() != model.OverlayNone {
+		t.Errorf("expected OverlayNone for stale worktree, got %d", m.Overlay())
+	}
+	if cmd != nil {
+		t.Error("expected nil cmd for stale worktree")
+	}
+}
+
+func TestModel_EnterOnEmptyWorktreeListIsNoOp(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.Overlay() != model.OverlayNone {
+		t.Errorf("expected OverlayNone with no worktrees, got %d", m.Overlay())
+	}
+	if cmd != nil {
+		t.Error("expected nil cmd with no worktrees")
+	}
+}
+
+func TestModel_WorktreeDiffResultStoresDiff(t *testing.T) {
+	m := model.New(testRepos())
+	wts := []gitquery.Worktree{
+		{Path: "/dev/alpha", BranchName: "main", Dirty: true},
+	}
+	m, _ = update(m, model.WorktreeResultMsg{RepoPath: "/dev/alpha", Worktrees: wts})
+	m, _ = update(m, model.WorktreeDiffResultMsg{
+		RepoPath:     "/dev/alpha",
+		WorktreePath: "/dev/alpha",
+		Diff:         "diff --git a/f.txt",
+	})
+	if m.OverlayDiff() != "diff --git a/f.txt" {
+		t.Errorf("expected diff stored, got %q", m.OverlayDiff())
+	}
+}
+
+func TestModel_StaleWorktreeDiffResultDiscarded(t *testing.T) {
+	m := model.New(testRepos())
+	m = selectBravo(m)
+	m, _ = update(m, model.WorktreeDiffResultMsg{
+		RepoPath:     "/dev/alpha",
+		WorktreePath: "/dev/alpha",
+		Diff:         "stale",
+	})
+	if m.OverlayDiff() != "" {
+		t.Errorf("expected stale worktree diff discarded, got %q", m.OverlayDiff())
+	}
+}
+
+func TestModel_WorktreeDiffResultDiscardedIfWorktreePathChanged(t *testing.T) {
+	m := model.New(testRepos())
+	wts := []gitquery.Worktree{
+		{Path: "/dev/alpha", BranchName: "main", Dirty: true},
+		{Path: "/dev/alpha-feat", BranchName: "feat", Dirty: true},
+	}
+	m = inRightPane(m)
+	m, _ = update(m, model.WorktreeResultMsg{RepoPath: "/dev/alpha", Worktrees: wts})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	m, _ = update(m, model.WorktreeDiffResultMsg{
+		RepoPath:     "/dev/alpha",
+		WorktreePath: "/dev/alpha",
+		Diff:         "wrong worktree",
+	})
+	if m.OverlayDiff() != "" {
+		t.Errorf("expected diff discarded for wrong worktree path, got %q", m.OverlayDiff())
+	}
+}
+
+// --- Worktree terminal/code actions ---
+
+func TestModel_TKey_Worktree_FiresCmd(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	wts := []gitquery.Worktree{
+		{Path: "/dev/alpha", BranchName: "main", IsMain: true},
+	}
+	m, _ = update(m, model.WorktreeResultMsg{RepoPath: "/dev/alpha", Worktrees: wts})
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	if cmd == nil {
+		t.Error("expected non-nil cmd for t key on worktree")
+	}
+}
+
+func TestModel_CKey_Worktree_FiresCmd(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	wts := []gitquery.Worktree{
+		{Path: "/dev/alpha", BranchName: "main", IsMain: true},
+	}
+	m, _ = update(m, model.WorktreeResultMsg{RepoPath: "/dev/alpha", Worktrees: wts})
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	if cmd == nil {
+		t.Error("expected non-nil cmd for c key on worktree")
+	}
+}
+
+func TestModel_TKey_StaleWorktree_NoCmd(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	wts := []gitquery.Worktree{
+		{Path: "/dev/alpha-gone", BranchName: "gone", Stale: true},
+	}
+	m, _ = update(m, model.WorktreeResultMsg{RepoPath: "/dev/alpha", Worktrees: wts})
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	if cmd != nil {
+		t.Error("expected nil cmd for t key on stale worktree")
+	}
+}
+
+func TestModel_CKey_StaleWorktree_NoCmd(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	wts := []gitquery.Worktree{
+		{Path: "/dev/alpha-gone", BranchName: "gone", Stale: true},
+	}
+	m, _ = update(m, model.WorktreeResultMsg{RepoPath: "/dev/alpha", Worktrees: wts})
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	if cmd != nil {
+		t.Error("expected nil cmd for c key on stale worktree")
+	}
+}
+
+func TestModel_TKey_EmptyWorktrees_NoCmd(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	if cmd != nil {
+		t.Error("expected nil cmd for t key with no worktrees")
+	}
+}
+
+func TestModel_CKey_EmptyWorktrees_NoCmd(t *testing.T) {
+	m := model.New(testRepos())
+	m = inRightPane(m)
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	if cmd != nil {
+		t.Error("expected nil cmd for c key with no worktrees")
+	}
+}
+
 // --- Branch diff (enter key) ---
 
 func TestModel_EnterStillRequiresDirtyWorktree(t *testing.T) {

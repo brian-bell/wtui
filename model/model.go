@@ -30,6 +30,7 @@ const (
 	OverlayBranchDiff
 	OverlayConfirm
 	OverlayCommitDiff
+	OverlayWorktreeDiff
 )
 
 // --- Messages ---
@@ -78,6 +79,12 @@ type CommitDiffResultMsg struct {
 	RepoPath string
 	Hash     string
 	Diff     string
+}
+
+type WorktreeDiffResultMsg struct {
+	RepoPath     string
+	WorktreePath string
+	Diff         string
 }
 
 type ClipboardResultMsg struct{}
@@ -209,6 +216,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleWorktreeResult(msg), nil
 	case CommitResultMsg:
 		return m.handleCommitResult(msg), nil
+	case WorktreeDiffResultMsg:
+		return m.handleWorktreeDiffResult(msg), nil
 	case CommitDiffResultMsg:
 		return m.handleCommitDiffResult(msg), nil
 	case ClipboardResultMsg:
@@ -464,6 +473,14 @@ func (m Model) handleCursorDown() (tea.Model, tea.Cmd) {
 // --- Action handlers ---
 
 func (m Model) handleEnter() (tea.Model, tea.Cmd) {
+	if m.mode == ModeWorktrees {
+		wt, ok := m.selectedWorktree()
+		if ok && wt.Dirty && !wt.Stale {
+			m.overlay = OverlayWorktreeDiff
+			return m, m.fetchWorktreeDiff()
+		}
+		return m, nil
+	}
 	if m.mode == ModeBranches && m.isSelectedBranchDirtyWorktree() {
 		m.overlay = OverlayBranchDiff
 		return m, m.fetchBranchDiff()
@@ -496,6 +513,13 @@ func (m Model) handleDelete() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleOpenTerminal() (tea.Model, tea.Cmd) {
+	if m.mode == ModeWorktrees {
+		if wt, ok := m.selectedWorktree(); ok && !wt.Stale {
+			path := wt.Path
+			return m, func() tea.Msg { _ = actions.OpenTerminal(path); return nil }
+		}
+		return m, nil
+	}
 	if m.mode == ModeHistory && len(m.repos) > 0 {
 		path := m.repos[m.selected].Path
 		return m, func() tea.Msg { _ = actions.OpenTerminal(path); return nil }
@@ -510,6 +534,13 @@ func (m Model) handleOpenTerminal() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleOpenCode() (tea.Model, tea.Cmd) {
+	if m.mode == ModeWorktrees {
+		if wt, ok := m.selectedWorktree(); ok && !wt.Stale {
+			path := wt.Path
+			return m, func() tea.Msg { _ = actions.OpenVSCode(path); return nil }
+		}
+		return m, nil
+	}
 	if m.mode == ModeHistory && len(m.repos) > 0 {
 		path := m.repos[m.selected].Path
 		return m, func() tea.Msg { _ = actions.OpenVSCode(path); return nil }
@@ -648,6 +679,15 @@ func (m Model) handleStashResult(msg StashResultMsg) Model {
 func (m Model) handleStashDiffResult(msg StashDiffResultMsg) Model {
 	if m.isCurrentRepo(msg.RepoPath) {
 		m.overlayDiff = msg.Diff
+	}
+	return m
+}
+
+func (m Model) handleWorktreeDiffResult(msg WorktreeDiffResultMsg) Model {
+	if m.isCurrentRepo(msg.RepoPath) {
+		if wt, ok := m.selectedWorktree(); ok && wt.Path == msg.WorktreePath {
+			m.overlayDiff = msg.Diff
+		}
 	}
 	return m
 }
@@ -798,6 +838,26 @@ func (m Model) fetchBranchDiff() tea.Cmd {
 	}
 }
 
+func (m Model) fetchWorktreeDiff() tea.Cmd {
+	if len(m.repos) == 0 {
+		return nil
+	}
+	wt, ok := m.selectedWorktree()
+	if !ok || !wt.Dirty || wt.Stale {
+		return nil
+	}
+	repoPath := m.repos[m.selected].Path
+	worktreePath := wt.Path
+	return func() tea.Msg {
+		diff, _ := gitquery.BranchDiff(worktreePath)
+		return WorktreeDiffResultMsg{
+			RepoPath:     repoPath,
+			WorktreePath: worktreePath,
+			Diff:         diff,
+		}
+	}
+}
+
 func (m Model) fetchStashDiff() tea.Cmd {
 	if len(m.repos) == 0 || len(m.stashes) == 0 {
 		return nil
@@ -840,6 +900,13 @@ func (m Model) selectedRow() (gitquery.BranchRow, bool) {
 		return gitquery.BranchRow{}, false
 	}
 	return m.rows[m.branchSelected], true
+}
+
+func (m Model) selectedWorktree() (gitquery.Worktree, bool) {
+	if m.worktreeSelected < 0 || m.worktreeSelected >= len(m.worktrees) {
+		return gitquery.Worktree{}, false
+	}
+	return m.worktrees[m.worktreeSelected], true
 }
 
 func (m Model) isSelectedBranchDirtyWorktree() bool {

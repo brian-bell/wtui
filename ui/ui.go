@@ -102,7 +102,13 @@ func Render(p RenderParams) string {
 		return renderOverlay(p)
 	}
 
-	statusBar := RenderStatusBar(p.Width, p.Mode, p.Overlay, p.ActivePane, p.Destructive)
+	var staleSelected, dirtySelected bool
+	if p.Mode == 1 && p.WorktreeSelected >= 0 && p.WorktreeSelected < len(p.Worktrees) {
+		wt := p.Worktrees[p.WorktreeSelected]
+		staleSelected = wt.Stale
+		dirtySelected = wt.Dirty
+	}
+	statusBar := RenderStatusBar(p.Width, p.Mode, p.Overlay, p.ActivePane, p.Destructive, staleSelected, dirtySelected)
 
 	// Border colors based on active pane
 	activeBorderColor := lipgloss.Color("12")
@@ -210,7 +216,7 @@ func renderModeHeader(mode, width int) string {
 }
 
 // RenderStatusBar produces the bottom status bar (hints only, no mode tabs).
-func RenderStatusBar(width, mode, overlay, activePane int, destructive bool) string {
+func RenderStatusBar(width, mode, overlay, activePane int, destructive, staleSelected, dirtySelected bool) string {
 	var hints string
 	if overlay == 3 {
 		hints = "  y: confirm  n/esc: cancel"
@@ -239,6 +245,12 @@ func RenderStatusBar(width, mode, overlay, activePane int, destructive bool) str
 		hints = " " + cleanStyle.Render("✔") + " clean  " + aheadBehindStyle.Render("●") + " ahead/behind  " + dirtyRedStyle.Render("●") + " dirty  " + noUpstreamStyle.Render("●") + " no upstream" + keys
 	} else {
 		hints = "  tab: pane  q/esc: quit  ↑/↓ select"
+		if mode == 1 && activePane == 1 && !staleSelected {
+			if dirtySelected {
+				hints += "  enter: diff"
+			}
+			hints += "  t: terminal  c: code"
+		}
 	}
 
 	return statusStyle.Width(width).Render(hints)
@@ -492,7 +504,7 @@ func renderWorktreePane(worktrees []gitquery.Worktree, selected, scroll, width, 
 }
 
 func renderOverlay(p RenderParams) string {
-	statusBar := RenderStatusBar(p.Width, p.Mode, p.Overlay, p.ActivePane, p.Destructive)
+	statusBar := RenderStatusBar(p.Width, p.Mode, p.Overlay, p.ActivePane, p.Destructive, false, false)
 	contentHeight := p.Height - 1
 
 	// Confirmation dialog overlay
