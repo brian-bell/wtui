@@ -381,6 +381,39 @@ func TestListBranches_WorktreeAnnotation(t *testing.T) {
 	}
 }
 
+func TestListBranches_StaleWorktreeDetected(t *testing.T) {
+	repo := realPath(t, initBranchRepo(t))
+
+	wtDir := realPath(t, t.TempDir())
+	wtPath := filepath.Join(wtDir, "wt-stale")
+	run(t, repo, "git", "branch", "stale-branch")
+	run(t, repo, "git", "worktree", "add", wtPath, "stale-branch")
+
+	// Delete the worktree directory without running git worktree remove,
+	// leaving a stale admin reference in .git/worktrees/.
+	os.RemoveAll(wtPath)
+
+	branches, err := gitquery.ListBranches(repo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	b := findBranch(branches, "stale-branch")
+	if b == nil {
+		t.Fatal("branch 'stale-branch' not found")
+	}
+	if !b.IsWorktree {
+		t.Error("expected IsWorktree = true")
+	}
+	if len(b.WorktreeStale) != len(b.WorktreePaths) {
+		t.Fatalf("expected WorktreeStale length %d to match WorktreePaths length %d",
+			len(b.WorktreeStale), len(b.WorktreePaths))
+	}
+	if !b.WorktreeStale[0] {
+		t.Error("expected WorktreeStale[0] = true for deleted worktree directory")
+	}
+}
+
 func TestListBranches_DuplicateWorktreePaths(t *testing.T) {
 	repo := realPath(t, initBranchRepo(t))
 
@@ -625,6 +658,29 @@ func TestFlattenBranches_NoPathGivesOneRowEmptyPath(t *testing.T) {
 	}
 	if rows[0].IsExpansion {
 		t.Error("no-path row should not be IsExpansion")
+	}
+}
+
+func TestFlattenBranches_StaleFlag(t *testing.T) {
+	branches := []gitquery.Branch{
+		{Name: "feat", IsWorktree: true, WorktreePaths: []string{"/dev/feat"}, WorktreeStale: []bool{true}},
+	}
+	rows := gitquery.FlattenBranches(branches)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if !rows[0].Stale {
+		t.Error("expected Stale=true for row with stale worktree path")
+	}
+}
+
+func TestFlattenBranches_NonStaleFlag(t *testing.T) {
+	branches := []gitquery.Branch{
+		{Name: "feat", IsWorktree: true, WorktreePaths: []string{"/dev/feat"}, WorktreeStale: []bool{false}},
+	}
+	rows := gitquery.FlattenBranches(branches)
+	if rows[0].Stale {
+		t.Error("expected Stale=false for non-stale worktree path")
 	}
 }
 

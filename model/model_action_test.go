@@ -461,6 +461,29 @@ func TestModel_ConfirmEnterExecutesAction(t *testing.T) {
 	}
 }
 
+func TestModel_WorktreeDeleteActionIncludesBranchDeletion(t *testing.T) {
+	// The confirm action closure should call ForceDeleteBranch after
+	// RemoveWorktree. We verify by checking the cmd returns
+	// WorktreeRemovedMsg with the branch name so the handler knows
+	// which branch was targeted.
+	m := modelWithWorktreeBranch()
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if cmd == nil {
+		t.Fatal("expected cmd, got nil")
+	}
+	msg := cmd()
+	// With fake paths, RemoveWorktree fails → DeleteFailedMsg
+	failMsg, ok := msg.(model.DeleteFailedMsg)
+	if !ok {
+		t.Fatalf("expected DeleteFailedMsg (fake path), got %T", msg)
+	}
+	// The BranchName field should be set for worktree deletions
+	if failMsg.BranchName != "feat" {
+		t.Errorf("expected BranchName='feat', got %q", failMsg.BranchName)
+	}
+}
+
 func TestModel_WorktreeRemoveFailReturnsDeleteFailedMsg(t *testing.T) {
 	// With a fake path, RemoveWorktree will fail → returns DeleteFailedMsg
 	m := modelWithWorktreeBranch()
@@ -633,6 +656,106 @@ func TestModel_StashDropConfirmReturnsStashDroppedMsg(t *testing.T) {
 	msg := cmd()
 	if _, ok := msg.(model.StashDroppedMsg); !ok {
 		t.Errorf("expected StashDroppedMsg, got %T", msg)
+	}
+}
+
+// --- Prune stale worktree ---
+
+func staleBranch() gitquery.Branch {
+	return gitquery.Branch{
+		Name:          "stale-feat",
+		IsWorktree:    true,
+		WorktreePaths: []string{"/dev/alpha/stale-feat"},
+		WorktreeStale: []bool{true},
+	}
+}
+
+func modelWithStaleBranch() model.Model {
+	m := model.New(testRepos())
+	m, _ = update(m, model.BranchResultMsg{
+		RepoPath: "/dev/alpha",
+		Branches: []gitquery.Branch{staleBranch()},
+	})
+	m = inRightPane(m)
+	m = enableDestructive(m)
+	return m
+}
+
+func TestModel_PKeyOnStaleWorktreeOpensConfirm(t *testing.T) {
+	m := modelWithStaleBranch()
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	if m.Overlay() != model.OverlayConfirm {
+		t.Errorf("expected OverlayConfirm, got %d", m.Overlay())
+	}
+	if !strings.Contains(m.ConfirmPrompt(), "Prune") {
+		t.Errorf("expected 'Prune' in prompt, got %q", m.ConfirmPrompt())
+	}
+	if !strings.Contains(m.ConfirmPrompt(), "/dev/alpha/stale-feat") {
+		t.Errorf("expected worktree path in prompt, got %q", m.ConfirmPrompt())
+	}
+}
+
+func TestModel_PKeyNoOpWithoutDestructiveMode(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, model.BranchResultMsg{
+		RepoPath: "/dev/alpha",
+		Branches: []gitquery.Branch{staleBranch()},
+	})
+	m = inRightPane(m)
+	// destructive mode NOT enabled
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	if m.Overlay() != model.OverlayNone {
+		t.Errorf("expected OverlayNone without destructive mode, got %d", m.Overlay())
+	}
+}
+
+func TestModel_PKeyNoOpOnNonStaleWorktree(t *testing.T) {
+	m := modelWithWorktreeBranch() // worktree exists (not stale)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	if m.Overlay() != model.OverlayNone {
+		t.Errorf("expected OverlayNone on non-stale worktree, got %d", m.Overlay())
+	}
+}
+
+func TestModel_PKeyNoOpOnNonWorktreeBranch(t *testing.T) {
+	m := model.New(testRepos())
+	m, _ = update(m, model.BranchResultMsg{
+		RepoPath: "/dev/alpha",
+		Branches: []gitquery.Branch{{Name: "plain"}},
+	})
+	m = inRightPane(m)
+	m = enableDestructive(m)
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	if m.Overlay() != model.OverlayNone {
+		t.Errorf("expected OverlayNone on non-worktree branch, got %d", m.Overlay())
+	}
+}
+
+func TestModel_PKeyConfirmReturnsPrunedMsg(t *testing.T) {
+	m := modelWithStaleBranch()
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if m.Overlay() != model.OverlayNone {
+		t.Errorf("expected overlay closed after confirm, got %d", m.Overlay())
+	}
+	if cmd == nil {
+		t.Fatal("expected cmd after prune confirm, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.WorktreePrunedMsg); !ok {
+		t.Fatalf("expected WorktreePrunedMsg, got %T", msg)
+	}
+}
+
+func TestModel_WorktreePrunedMsgRefreshesBranches(t *testing.T) {
+	m := model.New(testRepos())
+	m, cmd := update(m, model.WorktreePrunedMsg{RepoPath: "/dev/alpha"})
+	if cmd == nil {
+		t.Fatal("expected fetchBranches cmd after WorktreePrunedMsg, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(model.BranchResultMsg); !ok {
+		t.Fatalf("expected BranchResultMsg from fetch, got %T", msg)
 	}
 }
 

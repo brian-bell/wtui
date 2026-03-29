@@ -74,6 +74,7 @@ type RenderParams struct {
 	StashScroll    int
 	ActivePane     int
 	Destructive    bool
+	StaleSelected  bool
 }
 
 // Render produces the full terminal view string.
@@ -90,7 +91,7 @@ func Render(p RenderParams) string {
 		return renderOverlay(p)
 	}
 
-	statusBar := RenderStatusBar(p.Width, p.Mode, p.Overlay, p.ActivePane, p.Destructive)
+	statusBar := RenderStatusBar(p.Width, p.Mode, p.Overlay, p.ActivePane, p.Destructive, p.StaleSelected)
 
 	// Border colors based on active pane
 	activeBorderColor := lipgloss.Color("12")
@@ -188,7 +189,7 @@ func renderModeHeader(mode, width int) string {
 }
 
 // RenderStatusBar produces the bottom status bar (hints only, no mode tabs).
-func RenderStatusBar(width, mode, overlay, activePane int, destructive bool) string {
+func RenderStatusBar(width, mode, overlay, activePane int, destructive, staleSelected bool) string {
 	var hints string
 	if overlay == 3 {
 		hints = "  y: confirm  n/esc: cancel"
@@ -207,6 +208,9 @@ func RenderStatusBar(width, mode, overlay, activePane int, destructive bool) str
 			keys += "  t: terminal  c: code"
 			if destructive {
 				keys += "  " + dirtyRedStyle.Render("d: delete")
+				if staleSelected {
+					keys += "  " + dirtyRedStyle.Render("p: prune")
+				}
 			}
 		}
 		if !destructive {
@@ -252,22 +256,26 @@ func renderBranchPaneSelected(rows []gitquery.BranchRow, selected, scroll, width
 		branch := branchStyle.Render(b.Name)
 
 		var indicators string
-		if b.Ahead > 0 || b.Behind > 0 {
-			indicators += aheadBehindStyle.Render(" ●")
-			indicators += fmt.Sprintf(" +%d/-%d", b.Ahead, b.Behind)
-		}
-		if b.Dirty {
-			indicators += dirtyRedStyle.Render(" ●")
-			indicators += fmt.Sprintf(" %d files ", b.FilesChanged)
-			indicators += diffAddStyle.Render(fmt.Sprintf("+%d", b.LinesAdded))
-			indicators += "/" + diffDelStyle.Render(fmt.Sprintf("-%d", b.LinesDeleted))
-		}
-		if !b.HasUpstream || b.UpstreamGone {
-			indicators += noUpstreamStyle.Render(" ●")
-		}
+		if row.Stale {
+			indicators = dirtyRedStyle.Render(" ✗") + " " + dirtyRedStyle.Render("stale")
+		} else {
+			if b.Ahead > 0 || b.Behind > 0 {
+				indicators += aheadBehindStyle.Render(" ●")
+				indicators += fmt.Sprintf(" +%d/-%d", b.Ahead, b.Behind)
+			}
+			if b.Dirty {
+				indicators += dirtyRedStyle.Render(" ●")
+				indicators += fmt.Sprintf(" %d files ", b.FilesChanged)
+				indicators += diffAddStyle.Render(fmt.Sprintf("+%d", b.LinesAdded))
+				indicators += "/" + diffDelStyle.Render(fmt.Sprintf("-%d", b.LinesDeleted))
+			}
+			if !b.HasUpstream || b.UpstreamGone {
+				indicators += noUpstreamStyle.Render(" ●")
+			}
 
-		if indicators == "" {
-			indicators = cleanStyle.Render(" ✔")
+			if indicators == "" {
+				indicators = cleanStyle.Render(" ✔")
+			}
 		}
 
 		var locationLabel string
@@ -390,7 +398,7 @@ func renderStashPane(stashes []gitquery.Stash, selected, scroll, width, height i
 }
 
 func renderOverlay(p RenderParams) string {
-	statusBar := RenderStatusBar(p.Width, p.Mode, p.Overlay, p.ActivePane, p.Destructive)
+	statusBar := RenderStatusBar(p.Width, p.Mode, p.Overlay, p.ActivePane, p.Destructive, p.StaleSelected)
 	contentHeight := p.Height - 1
 
 	// Confirmation dialog overlay

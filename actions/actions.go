@@ -10,7 +10,9 @@ import (
 // in listings.
 func RemoveWorktree(repoPath, worktreePath string) error {
 	err := exec.Command("git", "-C", repoPath, "worktree", "remove", worktreePath).Run()
-	_ = exec.Command("git", "-C", repoPath, "worktree", "prune").Run()
+	if err == nil {
+		_ = exec.Command("git", "-C", repoPath, "worktree", "prune").Run()
+	}
 	return err
 }
 
@@ -18,8 +20,15 @@ func RemoveWorktree(repoPath, worktreePath string) error {
 // stale references.
 func ForceRemoveWorktree(repoPath, worktreePath string) error {
 	err := exec.Command("git", "-C", repoPath, "worktree", "remove", "--force", worktreePath).Run()
-	_ = exec.Command("git", "-C", repoPath, "worktree", "prune").Run()
+	if err == nil {
+		_ = exec.Command("git", "-C", repoPath, "worktree", "prune").Run()
+	}
 	return err
+}
+
+// PruneWorktree runs `git worktree prune` to remove stale admin references.
+func PruneWorktree(repoPath string) error {
+	return exec.Command("git", "-C", repoPath, "worktree", "prune").Run()
 }
 
 // DeleteBranch runs `git branch -d`.

@@ -2,6 +2,7 @@ package gitquery
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -25,6 +26,7 @@ type Branch struct {
 	Unpushed      []string
 	IsWorktree    bool
 	WorktreePaths []string
+	WorktreeStale []bool // parallel to WorktreePaths; true when directory is missing
 	Dirty         bool
 	FilesChanged  int
 	LinesAdded    int
@@ -37,6 +39,7 @@ type BranchRow struct {
 	Branch       Branch
 	WorktreePath string // specific path for this row; empty for non-worktree branches
 	IsExpansion  bool   // true for 2nd+ rows of a multi-worktree branch
+	Stale        bool   // true when the worktree directory no longer exists on disk
 }
 
 // FlattenBranches converts a branch list into display rows,
@@ -49,7 +52,8 @@ func FlattenBranches(branches []Branch) []BranchRow {
 			continue
 		}
 		for i, p := range b.WorktreePaths {
-			rows = append(rows, BranchRow{Branch: b, WorktreePath: p, IsExpansion: i > 0})
+			stale := i < len(b.WorktreeStale) && b.WorktreeStale[i]
+			rows = append(rows, BranchRow{Branch: b, WorktreePath: p, IsExpansion: i > 0, Stale: stale})
 		}
 	}
 	return rows
@@ -132,6 +136,7 @@ func ListBranches(repoPath string) ([]Branch, error) {
 		if wtPaths, ok := wtMap[b.Name]; ok {
 			b.IsWorktree = true
 			b.WorktreePaths = wtPaths
+			b.WorktreeStale = checkStale(wtPaths)
 			populateDirtyStatus(&b, wtPaths)
 		}
 
@@ -143,6 +148,7 @@ func ListBranches(repoPath string) ([]Branch, error) {
 			Name:          "(detached)",
 			IsWorktree:    true,
 			WorktreePaths: []string{path},
+			WorktreeStale: checkStale([]string{path}),
 		}
 		populateDirtyStatus(&b, b.WorktreePaths)
 		branches = append(branches, b)
@@ -302,6 +308,16 @@ func populateDirtyStatus(b *Branch, paths []string) {
 			b.LinesDeleted += deleted
 		}
 	}
+}
+
+func checkStale(paths []string) []bool {
+	stale := make([]bool, len(paths))
+	for i, p := range paths {
+		if _, err := os.Stat(p); os.IsNotExist(err) {
+			stale[i] = true
+		}
+	}
+	return stale
 }
 
 func firstWorktreePath(paths []string) string {
