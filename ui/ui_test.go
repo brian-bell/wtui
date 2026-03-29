@@ -227,6 +227,26 @@ func TestStashPane_ShortMessageShowsOneLine(t *testing.T) {
 	}
 }
 
+func TestStashPane_SelectedLongMessageHighlightsBothLines(t *testing.T) {
+	width := 50
+	// Message wraps to 2 lines but the remainder is short, so selected
+	// (padded to full width) and unselected (unpadded) must differ.
+	longMsg := "this is a long stash message that wraps ok"
+	stashes := []gitquery.Stash{
+		{Index: 0, Date: "2026-03-18 10:00:00", Message: longMsg},
+	}
+	// Render with stash selected vs not selected
+	selLines := renderStashPane(stashes, 0, 0, width, 10)
+	unselLines := renderStashPane(stashes, -1, 0, width, 10)
+
+	// The continuation line (index 1) should differ between selected and
+	// unselected renders — stashSelStyle.Width(width) pads the selected
+	// continuation to full width, while the unselected one is unpadded.
+	if selLines[1] == unselLines[1] {
+		t.Error("continuation line should be styled differently when stash is selected")
+	}
+}
+
 func TestStashPane_ScrollOffset(t *testing.T) {
 	width := 50
 	stashes := []gitquery.Stash{

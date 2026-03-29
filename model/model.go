@@ -650,7 +650,7 @@ func (m Model) isSelectedBranchDirtyWorktree() bool {
 }
 
 func (m Model) ensureStashVisible() Model {
-	contentHeight := m.height - ui.BranchContentOverhead
+	contentHeight := m.height - ui.StashContentOverhead
 	if contentHeight <= 0 {
 		contentHeight = 1
 	}

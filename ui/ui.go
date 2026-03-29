@@ -22,6 +22,11 @@ const RepoContentOverhead = 3
 // this constant so they stay in sync.
 const BranchContentOverhead = 5
 
+// StashContentOverhead is the number of rows consumed by chrome around the
+// stash list. Currently identical to BranchContentOverhead (both share the
+// right-pane chrome: status bar + borders + mode header).
+const StashContentOverhead = BranchContentOverhead
+
 // StashPrefixWidth is the visible width consumed by the stash line prefix:
 // indent/cursor (3) + date (10) + separator (2).
 const StashPrefixWidth = 15
@@ -363,8 +368,13 @@ func renderStashPane(stashes []gitquery.Stash, selected, scroll, width, height i
 		}
 
 		if msgRest != "" {
-			contLine := truncateToWidth(contIndent+stashMsgStyle.Render(msgRest), width)
-			content = append(content, contLine)
+			if i == selected {
+				contLine := truncateToWidth(contIndent+msgRest, width)
+				content = append(content, stashSelStyle.Width(width).Render(contLine))
+			} else {
+				contLine := truncateToWidth(contIndent+stashMsgStyle.Render(msgRest), width)
+				content = append(content, contLine)
+			}
 		}
 	}
 

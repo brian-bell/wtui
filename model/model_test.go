@@ -486,9 +486,16 @@ func TestModel_StashScrollFollowsCursor(t *testing.T) {
 	if m.StashScroll() == 0 {
 		t.Error("expected scroll to advance when cursor moves past viewport")
 	}
-	// Cursor must be within visible viewport
-	if m.StashSelected() < m.StashScroll() || m.StashSelected() >= m.StashScroll()+contentHeight {
-		t.Errorf("cursor %d not in scroll viewport [%d, %d)", m.StashSelected(), m.StashScroll(), m.StashScroll()+contentHeight)
+	// Compute the visual line of the selected stash (sum of line counts for all preceding stashes)
+	visLine := 0
+	for i, s := range stashes {
+		if i == m.StashSelected() {
+			break
+		}
+		visLine += ui.StashLineCount(s.Message, 80-ui.LeftPaneWidth-2)
+	}
+	if visLine < m.StashScroll() || visLine >= m.StashScroll()+contentHeight {
+		t.Errorf("visual line %d not in scroll viewport [%d, %d)", visLine, m.StashScroll(), m.StashScroll()+contentHeight)
 	}
 
 	// Move back up to 0
