@@ -22,16 +22,17 @@ const (
 	ModeReflog
 )
 
-// OverlayState represents what overlay (if any) is displayed.
-type OverlayState int
+// OverlayState is an alias so tests can reference model.OverlayNone etc.
+type OverlayState = ui.OverlayState
 
 const (
-	OverlayNone OverlayState = iota
-	OverlayStashDiff
-	OverlayBranchDiff
-	OverlayConfirm
-	OverlayCommitDiff
-	OverlayWorktreeDiff
+	OverlayNone         = ui.OverlayNone
+	OverlayStashDiff    = ui.OverlayStashDiff
+	OverlayBranchDiff   = ui.OverlayBranchDiff
+	OverlayConfirm      = ui.OverlayConfirm
+	OverlayCommitDiff   = ui.OverlayCommitDiff
+	OverlayWorktreeDiff = ui.OverlayWorktreeDiff
+	OverlayReflogDiff   = ui.OverlayReflogDiff
 )
 
 // --- Messages ---
@@ -104,6 +105,12 @@ type WorktreePrunedMsg struct {
 type ReflogResultMsg struct {
 	RepoPath string
 	Reflogs  []gitquery.ReflogEntry
+}
+
+type ReflogDiffResultMsg struct {
+	RepoPath string
+	Hash     string
+	Diff     string
 }
 
 type ClipboardResultMsg struct{}
@@ -196,7 +203,7 @@ func (m Model) View() string {
 		Stashes:          m.stashes,
 		BranchSelected:   m.branchSelected,
 		StashSelected:    m.stashSelected,
-		Overlay:          int(m.overlay),
+		Overlay:          m.overlay,
 		OverlayDiff:      m.overlayDiff,
 		OverlayScroll:    m.overlayScroll,
 		ConfirmPrompt:    m.confirmPrompt,
@@ -257,6 +264,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleWorktreeDiffResult(msg), nil
 	case CommitDiffResultMsg:
 		return m.handleCommitDiffResult(msg), nil
+	case ReflogDiffResultMsg:
+		return m.handleReflogDiffResult(msg), nil
 	case ClipboardResultMsg:
 		return m, nil
 	case DeleteFailedMsg:
@@ -578,7 +587,7 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 		return m, m.fetchCommitDiff()
 	}
 	if m.mode == ModeReflog && len(m.reflogs) > 0 {
-		m.overlay = OverlayCommitDiff
+		m.overlay = OverlayReflogDiff
 		return m, m.fetchReflogDiff()
 	}
 	return m, nil
@@ -974,6 +983,15 @@ func (m Model) handleCommitDiffResult(msg CommitDiffResultMsg) Model {
 	return m
 }
 
+func (m Model) handleReflogDiffResult(msg ReflogDiffResultMsg) Model {
+	if m.isCurrentRepo(msg.RepoPath) {
+		if m.reflogSelected < len(m.reflogs) && m.reflogs[m.reflogSelected].Hash == msg.Hash {
+			m.overlayDiff = msg.Diff
+		}
+	}
+	return m
+}
+
 func (m Model) handleCopyHash() (tea.Model, tea.Cmd) {
 	var hash string
 	switch {
@@ -1127,8 +1145,8 @@ func (m Model) fetchReflogDiff() tea.Cmd {
 	}
 	hash := m.reflogs[m.reflogSelected].Hash
 	return func() tea.Msg {
-		diff, _ := gitquery.CommitDiff(repoPath, hash)
-		return CommitDiffResultMsg{RepoPath: repoPath, Hash: hash, Diff: diff}
+		diff, _ := gitquery.ReflogDiff(repoPath, hash)
+		return ReflogDiffResultMsg{RepoPath: repoPath, Hash: hash, Diff: diff}
 	}
 }
 

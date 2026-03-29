@@ -1283,18 +1283,59 @@ func TestModel_YKeyNoOpWithNoReflogs(t *testing.T) {
 	}
 }
 
-func TestModel_EnterInReflogOpensCommitDiffOverlay(t *testing.T) {
+func TestModel_EnterInReflogOpensReflogDiffOverlay(t *testing.T) {
 	m := modelInReflogWithEntries()
 	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyEnter})
-	if m.Overlay() != model.OverlayCommitDiff {
-		t.Errorf("expected OverlayCommitDiff, got %d", m.Overlay())
+	if m.Overlay() != model.OverlayReflogDiff {
+		t.Errorf("expected OverlayReflogDiff, got %d", m.Overlay())
 	}
 	if cmd == nil {
 		t.Fatal("expected fetchReflogDiff cmd, got nil")
 	}
 	msg := cmd()
-	if _, ok := msg.(model.CommitDiffResultMsg); !ok {
-		t.Errorf("expected CommitDiffResultMsg, got %T", msg)
+	if _, ok := msg.(model.ReflogDiffResultMsg); !ok {
+		t.Errorf("expected ReflogDiffResultMsg, got %T", msg)
+	}
+}
+
+func TestModel_ReflogDiffResultStoresDiff(t *testing.T) {
+	m := modelInReflogWithEntries()
+	m, _ = update(m, model.ReflogDiffResultMsg{RepoPath: "/dev/alpha", Hash: "abc1234", Diff: "diff --git a/f.txt"})
+	if m.OverlayDiff() != "diff --git a/f.txt" {
+		t.Errorf("expected diff stored, got %q", m.OverlayDiff())
+	}
+}
+
+func TestModel_StaleReflogDiffResultDiscarded(t *testing.T) {
+	m := modelInReflogWithEntries()
+	m = selectBravo(m)
+	m, _ = update(m, model.ReflogDiffResultMsg{RepoPath: "/dev/alpha", Hash: "abc1234", Diff: "stale"})
+	if m.OverlayDiff() != "" {
+		t.Errorf("expected stale reflog diff discarded, got %q", m.OverlayDiff())
+	}
+}
+
+func TestModel_TKeyNoOpInReflogMode(t *testing.T) {
+	m := modelInReflogWithEntries()
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	if cmd != nil {
+		t.Errorf("expected nil cmd for t key in reflog mode, got %T", cmd)
+	}
+}
+
+func TestModel_CKeyNoOpInReflogMode(t *testing.T) {
+	m := modelInReflogWithEntries()
+	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	if cmd != nil {
+		t.Errorf("expected nil cmd for c key in reflog mode, got %T", cmd)
+	}
+}
+
+func TestModel_ReflogDiffResultWrongHashDiscarded(t *testing.T) {
+	m := modelInReflogWithEntries()
+	m, _ = update(m, model.ReflogDiffResultMsg{RepoPath: "/dev/alpha", Hash: "wrong", Diff: "wrong diff"})
+	if m.OverlayDiff() != "" {
+		t.Errorf("expected wrong-hash reflog diff discarded, got %q", m.OverlayDiff())
 	}
 }
 

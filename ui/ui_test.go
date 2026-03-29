@@ -598,7 +598,7 @@ func TestRender_ConfirmDialogShowsPrompt(t *testing.T) {
 		Width:         80,
 		Height:        24,
 		Mode:          1,
-		Overlay:       3,
+		Overlay:       OverlayConfirm,
 		ConfirmPrompt: "Remove worktree /dev/alpha/feat? (y/n)",
 	})
 	if !strings.Contains(view, "Remove worktree /dev/alpha/feat") {
@@ -615,7 +615,7 @@ func TestRender_ForceConfirmDialogShowsPrompt(t *testing.T) {
 		Width:         80,
 		Height:        24,
 		Mode:          1,
-		Overlay:       3,
+		Overlay:       OverlayConfirm,
 		ConfirmPrompt: "Force delete /dev/alpha/feat? (y/n)",
 		ConfirmForce:  true,
 	})
@@ -1071,6 +1071,35 @@ func TestReflogPane_SelectedHighlighted(t *testing.T) {
 	lines := renderReflogPane(entries, 1, 0, 80, 10)
 	if !strings.Contains(lines[1], " > ") {
 		t.Error("expected selected row to contain ' > ' prefix")
+	}
+}
+
+func TestReflogDiffOverlay_EmptyDiffShowsMessage(t *testing.T) {
+	view := Render(RenderParams{
+		Width:   80,
+		Height:  24,
+		Mode:    5,
+		Overlay: OverlayReflogDiff,
+		// OverlayDiff is empty
+	})
+	if !strings.Contains(view, "No changes at this reflog entry") {
+		t.Error("expected 'No changes at this reflog entry' in empty reflog diff overlay")
+	}
+}
+
+func TestReflogDiffOverlay_NonEmptyDiffShowsContent(t *testing.T) {
+	view := Render(RenderParams{
+		Width:       80,
+		Height:      24,
+		Mode:        5,
+		Overlay:     OverlayReflogDiff,
+		OverlayDiff: "diff --git a/f.txt\n+added line",
+	})
+	if !strings.Contains(view, "diff --git") {
+		t.Error("expected diff content in reflog diff overlay")
+	}
+	if strings.Contains(view, "No changes") {
+		t.Error("should not show 'No changes' when diff has content")
 	}
 }
 

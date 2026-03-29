@@ -10,6 +10,19 @@ import (
 	"github.com/brian-bell/wtui/scanner"
 )
 
+// OverlayState represents what overlay (if any) is displayed.
+type OverlayState int
+
+const (
+	OverlayNone OverlayState = iota
+	OverlayStashDiff
+	OverlayBranchDiff
+	OverlayConfirm
+	OverlayCommitDiff
+	OverlayWorktreeDiff
+	OverlayReflogDiff
+)
+
 const LeftPaneWidth = 30
 
 // RepoContentOverhead is the number of rows consumed by chrome around the
@@ -70,7 +83,7 @@ type RenderParams struct {
 	Stashes          []gitquery.Stash
 	BranchSelected   int
 	StashSelected    int
-	Overlay          int
+	Overlay          OverlayState
 	OverlayDiff      string
 	OverlayScroll    int
 	ConfirmPrompt    string
@@ -101,7 +114,7 @@ func Render(p RenderParams) string {
 	}
 
 	// Overlay takes over the entire screen
-	if p.Overlay != 0 {
+	if p.Overlay != OverlayNone {
 		return renderOverlay(p)
 	}
 
@@ -224,12 +237,12 @@ func renderModeHeader(mode, width int) string {
 }
 
 // RenderStatusBar produces the bottom status bar (hints only, no mode tabs).
-func RenderStatusBar(width, mode, overlay, activePane int, destructive, staleSelected, dirtySelected bool) string {
+func RenderStatusBar(width, mode int, overlay OverlayState, activePane int, destructive, staleSelected, dirtySelected bool) string {
 	var hints string
 	switch {
-	case overlay == 3:
+	case overlay == OverlayConfirm:
 		hints = "  y: confirm  n/esc: cancel"
-	case overlay != 0:
+	case overlay != OverlayNone:
 		hints = "  ↑/↓ scroll  esc: close"
 	case mode == 5:
 		hints = "  tab: pane  q/esc: quit  ↑/↓ select  enter: diff  y: copy hash"
@@ -503,7 +516,7 @@ func renderOverlay(p RenderParams) string {
 	contentHeight := p.Height - 1
 
 	// Confirmation dialog overlay
-	if p.Overlay == 3 {
+	if p.Overlay == OverlayConfirm {
 		lines := renderConfirmDialog(p.ConfirmPrompt, p.ConfirmForce, p.Width, contentHeight)
 		return strings.Join(lines, "\n") + "\n" + statusBar
 	}
@@ -511,6 +524,16 @@ func renderOverlay(p RenderParams) string {
 	var diffLines []string
 	if p.OverlayDiff != "" {
 		diffLines = strings.Split(p.OverlayDiff, "\n")
+	} else if p.Overlay == OverlayReflogDiff { // empty diff (e.g. checkout entry)
+		lines := make([]string, contentHeight)
+		msg := placeholderStyle.Render("No changes at this reflog entry")
+		mid := contentHeight / 2
+		pad := (p.Width - lipgloss.Width(msg)) / 2
+		if pad < 0 {
+			pad = 0
+		}
+		lines[mid] = strings.Repeat(" ", pad) + msg
+		return strings.Join(lines, "\n") + "\n" + statusBar
 	}
 
 	// Apply scroll offset

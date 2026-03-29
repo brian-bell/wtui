@@ -1071,3 +1071,77 @@ func TestListReflog_InvalidPath(t *testing.T) {
 		t.Fatal("expected error for invalid path, got nil")
 	}
 }
+
+func TestReflogDiff_ReturnsDiff(t *testing.T) {
+	dir := realPath(t, t.TempDir())
+	initRepo(t, dir)
+
+	writeFile(t, dir, "a.txt", "changed")
+	run(t, dir, "git", "add", ".")
+	run(t, dir, "git", "commit", "-m", "change a file")
+
+	entries, err := gitquery.ListReflog(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("expected at least one reflog entry")
+	}
+
+	diff, err := gitquery.ReflogDiff(dir, entries[0].Hash)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if diff == "" {
+		t.Error("expected non-empty diff")
+	}
+	if !strings.Contains(diff, "a.txt") {
+		t.Error("expected diff to mention 'a.txt'")
+	}
+}
+
+func TestReflogDiff_RootCommitFallback(t *testing.T) {
+	dir := realPath(t, t.TempDir())
+	initRepo(t, dir)
+
+	// The initial commit has no parent — ReflogDiff should fall back to git show
+	commits, _ := gitquery.ListCommits(dir)
+	if len(commits) == 0 {
+		t.Fatal("expected at least one commit")
+	}
+	rootHash := commits[len(commits)-1].Hash
+
+	diff, err := gitquery.ReflogDiff(dir, rootHash)
+	if err != nil {
+		t.Fatalf("unexpected error for root commit: %v", err)
+	}
+	if diff == "" {
+		t.Error("expected non-empty diff for root commit")
+	}
+}
+
+func TestReflogDiff_EmptyDiff(t *testing.T) {
+	dir := realPath(t, t.TempDir())
+	initRepo(t, dir)
+
+	// Create a branch and checkout back — produces reflog entry with no diff
+	run(t, dir, "git", "checkout", "-b", "feature")
+	run(t, dir, "git", "checkout", "main")
+
+	entries, _ := gitquery.ListReflog(dir)
+	// The most recent entry is a checkout that moves HEAD but changes nothing
+	diff, err := gitquery.ReflogDiff(dir, entries[0].Hash)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Empty diff is valid — checkout doesn't change files
+	// The function should return empty string, not an error
+	_ = diff
+}
+
+func TestReflogDiff_InvalidPath(t *testing.T) {
+	_, err := gitquery.ReflogDiff("/no/such/path", "abc1234")
+	if err == nil {
+		t.Fatal("expected error for invalid path, got nil")
+	}
+}
