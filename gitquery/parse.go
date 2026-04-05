@@ -53,6 +53,17 @@ func ParseStashList(text string) []Stash {
 	return stashes
 }
 
+// ParseAheadBehind parses the output of git rev-list --count --left-right.
+func ParseAheadBehind(text string) (int, int) {
+	parts := strings.Fields(strings.TrimSpace(text))
+	if len(parts) != 2 {
+		return 0, 0
+	}
+	ahead, _ := strconv.Atoi(parts[0])
+	behind, _ := strconv.Atoi(parts[1])
+	return ahead, behind
+}
+
 // ParseNumstat parses the output of git diff --numstat.
 // Returns total lines added and deleted. Binary files (shown as - -) contribute 0.
 func ParseNumstat(text string) (int, int) {

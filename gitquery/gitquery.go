@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -372,14 +371,7 @@ func branchAheadBehind(repoPath, branchName, upstream string) (int, int, error) 
 	if err != nil {
 		return 0, 0, err
 	}
-
-	parts := strings.Fields(strings.TrimSpace(out))
-	if len(parts) != 2 {
-		return 0, 0, nil
-	}
-
-	ahead, _ := strconv.Atoi(parts[0])
-	behind, _ := strconv.Atoi(parts[1])
+	ahead, behind := ParseAheadBehind(out)
 	return ahead, behind, nil
 }
 

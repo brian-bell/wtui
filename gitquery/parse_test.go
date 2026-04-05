@@ -171,3 +171,34 @@ func TestParseNumstat_MalformedLineSkipped(t *testing.T) {
 		t.Errorf("expected deleted 1, got %d", deleted)
 	}
 }
+
+func TestParseAheadBehind_ParsesCounts(t *testing.T) {
+	ahead, behind := gitquery.ParseAheadBehind("3\t2\n")
+	if ahead != 3 {
+		t.Errorf("expected ahead 3, got %d", ahead)
+	}
+	if behind != 2 {
+		t.Errorf("expected behind 2, got %d", behind)
+	}
+}
+
+func TestParseAheadBehind_ZeroCounts(t *testing.T) {
+	ahead, behind := gitquery.ParseAheadBehind("0\t0\n")
+	if ahead != 0 || behind != 0 {
+		t.Errorf("expected (0, 0), got (%d, %d)", ahead, behind)
+	}
+}
+
+func TestParseAheadBehind_EmptyInput(t *testing.T) {
+	ahead, behind := gitquery.ParseAheadBehind("")
+	if ahead != 0 || behind != 0 {
+		t.Errorf("expected (0, 0), got (%d, %d)", ahead, behind)
+	}
+}
+
+func TestParseAheadBehind_MalformedInput(t *testing.T) {
+	ahead, behind := gitquery.ParseAheadBehind("notanumber")
+	if ahead != 0 || behind != 0 {
+		t.Errorf("expected (0, 0), got (%d, %d)", ahead, behind)
+	}
+}
