@@ -167,26 +167,7 @@ func ListCommits(repoPath string) ([]Commit, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listing commits: %w", err)
 	}
-
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return nil, nil
-	}
-
-	var commits []Commit
-	for _, line := range strings.Split(text, "\n") {
-		parts := strings.SplitN(line, "\x00", 4)
-		if len(parts) != 4 {
-			continue
-		}
-		commits = append(commits, Commit{
-			Hash:    parts[0],
-			Author:  parts[1],
-			Date:    parts[2],
-			Subject: parts[3],
-		})
-	}
-	return commits, nil
+	return ParseCommitLog(text), nil
 }
 
 // ListReflog returns the most recent 50 HEAD reflog entries for the given repo path.
