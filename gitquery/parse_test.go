@@ -159,6 +159,13 @@ func TestParseNumstat_BinaryFilesIgnored(t *testing.T) {
 	}
 }
 
+func TestParseNumstat_WhitespaceOnlyInput(t *testing.T) {
+	added, deleted := gitquery.ParseNumstat("  \n  \n")
+	if added != 0 || deleted != 0 {
+		t.Errorf("expected (0, 0), got (%d, %d)", added, deleted)
+	}
+}
+
 func TestParseNumstat_MalformedLineSkipped(t *testing.T) {
 	input := "3\t1\tfile.go\nbadline\n2\t0\tother.go\n"
 
@@ -242,6 +249,20 @@ func TestParseBranchLine_NoUpstream(t *testing.T) {
 
 	if b.Name != "local-only" {
 		t.Errorf("expected Name %q, got %q", "local-only", b.Name)
+	}
+	if b.HasUpstream {
+		t.Error("expected HasUpstream = false")
+	}
+	if upstream != "" {
+		t.Errorf("expected empty upstream, got %q", upstream)
+	}
+}
+
+func TestParseBranchLine_EmptyInput(t *testing.T) {
+	b, upstream := gitquery.ParseBranchLine("")
+
+	if b.Name != "" {
+		t.Errorf("expected empty Name, got %q", b.Name)
 	}
 	if b.HasUpstream {
 		t.Error("expected HasUpstream = false")

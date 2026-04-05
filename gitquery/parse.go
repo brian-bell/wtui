@@ -111,7 +111,7 @@ type WorktreeInfo struct {
 // into a slice of WorktreeInfo entries.
 func ParseWorktreeList(output string) []WorktreeInfo {
 	output = strings.TrimRight(output, "\n")
-	if strings.TrimSpace(output) == "" {
+	if output == "" {
 		return nil
 	}
 
