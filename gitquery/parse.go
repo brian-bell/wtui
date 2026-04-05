@@ -53,6 +53,23 @@ func ParseStashList(text string) []Stash {
 	return stashes
 }
 
+// ParseNumstat parses the output of git diff --numstat.
+// Returns total lines added and deleted. Binary files (shown as - -) contribute 0.
+func ParseNumstat(text string) (int, int) {
+	var added, deleted int
+	for _, line := range splitLines(text) {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		a, _ := strconv.Atoi(fields[0])
+		d, _ := strconv.Atoi(fields[1])
+		added += a
+		deleted += d
+	}
+	return added, deleted
+}
+
 // ParseCommitLog parses the output of git log --format=%h%x00%an%x00%ar%x00%s.
 func ParseCommitLog(text string) []Commit {
 	text = strings.TrimSpace(text)

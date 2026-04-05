@@ -149,16 +149,7 @@ func populateWorktreeDirtyStatus(wt *Worktree) {
 	if err != nil {
 		return
 	}
-	for _, line := range splitLines(diffOut) {
-		fields := strings.Fields(line)
-		if len(fields) < 3 {
-			continue
-		}
-		added, _ := strconv.Atoi(fields[0])
-		deleted, _ := strconv.Atoi(fields[1])
-		wt.LinesAdded += added
-		wt.LinesDeleted += deleted
-	}
+	wt.LinesAdded, wt.LinesDeleted = ParseNumstat(diffOut)
 }
 
 // ListCommits returns the most recent 50 commits for the given repo path.
@@ -417,17 +408,9 @@ func populateDirtyStatus(b *Branch, paths []string) {
 		if err != nil {
 			continue
 		}
-		for _, line := range splitLines(diffOut) {
-			fields := strings.Fields(line)
-			if len(fields) < 3 {
-				continue
-			}
-			// Binary files show "-\t-\tfilename"; Atoi returns 0 for "-".
-			added, _ := strconv.Atoi(fields[0])
-			deleted, _ := strconv.Atoi(fields[1])
-			b.LinesAdded += added
-			b.LinesDeleted += deleted
-		}
+		a, d := ParseNumstat(diffOut)
+		b.LinesAdded += a
+		b.LinesDeleted += d
 	}
 }
 

@@ -125,3 +125,49 @@ func TestParseStashList_MalformedLineSkipped(t *testing.T) {
 		t.Fatalf("expected 1 stash (malformed skipped), got %d", len(stashes))
 	}
 }
+
+func TestParseNumstat_ParsesAddedDeleted(t *testing.T) {
+	input := "3\t1\tfile.go\n10\t5\tother.go\n"
+
+	added, deleted := gitquery.ParseNumstat(input)
+
+	if added != 13 {
+		t.Errorf("expected added 13, got %d", added)
+	}
+	if deleted != 6 {
+		t.Errorf("expected deleted 6, got %d", deleted)
+	}
+}
+
+func TestParseNumstat_EmptyInput(t *testing.T) {
+	added, deleted := gitquery.ParseNumstat("")
+	if added != 0 || deleted != 0 {
+		t.Errorf("expected (0, 0), got (%d, %d)", added, deleted)
+	}
+}
+
+func TestParseNumstat_BinaryFilesIgnored(t *testing.T) {
+	input := "3\t1\ttext.go\n-\t-\tbinary.png\n"
+
+	added, deleted := gitquery.ParseNumstat(input)
+
+	if added != 3 {
+		t.Errorf("expected added 3, got %d", added)
+	}
+	if deleted != 1 {
+		t.Errorf("expected deleted 1, got %d", deleted)
+	}
+}
+
+func TestParseNumstat_MalformedLineSkipped(t *testing.T) {
+	input := "3\t1\tfile.go\nbadline\n2\t0\tother.go\n"
+
+	added, deleted := gitquery.ParseNumstat(input)
+
+	if added != 5 {
+		t.Errorf("expected added 5, got %d", added)
+	}
+	if deleted != 1 {
+		t.Errorf("expected deleted 1, got %d", deleted)
+	}
+}
