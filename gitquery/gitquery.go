@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -97,27 +96,25 @@ func ListWorktrees(repoPath string) ([]Worktree, error) {
 
 	var worktrees []Worktree
 	first := true
-	for _, block := range splitWorktreeBlocks(out) {
-		wt := parseWorktreeBlock(block)
-		if wt.isBare {
+	for _, wt := range ParseWorktreeList(out) {
+		if wt.IsBare {
 			continue
 		}
 
 		w := Worktree{
-			Path:     wt.path,
-			Detached: wt.detached,
+			Path:     wt.Path,
+			Detached: wt.Detached,
 			IsMain:   first,
 		}
-		if wt.detached {
+		if wt.Detached {
 			w.BranchName = ""
 		} else {
-			w.BranchName = wt.branch
+			w.BranchName = wt.Branch
 		}
 		first = false
 		worktrees = append(worktrees, w)
 	}
 
-	// Batch stale detection for all worktrees
 	paths := make([]string, len(worktrees))
 	for i := range worktrees {
 		paths[i] = worktrees[i].Path
@@ -149,16 +146,7 @@ func populateWorktreeDirtyStatus(wt *Worktree) {
 	if err != nil {
 		return
 	}
-	for _, line := range splitLines(diffOut) {
-		fields := strings.Fields(line)
-		if len(fields) < 3 {
-			continue
-		}
-		added, _ := strconv.Atoi(fields[0])
-		deleted, _ := strconv.Atoi(fields[1])
-		wt.LinesAdded += added
-		wt.LinesDeleted += deleted
-	}
+	wt.LinesAdded, wt.LinesDeleted = ParseNumstat(diffOut)
 }
 
 // ListCommits returns the most recent 50 commits for the given repo path.
@@ -167,26 +155,7 @@ func ListCommits(repoPath string) ([]Commit, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listing commits: %w", err)
 	}
-
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return nil, nil
-	}
-
-	var commits []Commit
-	for _, line := range strings.Split(text, "\n") {
-		parts := strings.SplitN(line, "\x00", 4)
-		if len(parts) != 4 {
-			continue
-		}
-		commits = append(commits, Commit{
-			Hash:    parts[0],
-			Author:  parts[1],
-			Date:    parts[2],
-			Subject: parts[3],
-		})
-	}
-	return commits, nil
+	return ParseCommitLog(text), nil
 }
 
 // ListReflog returns the most recent 50 HEAD reflog entries for the given repo path.
@@ -195,26 +164,7 @@ func ListReflog(repoPath string) ([]ReflogEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listing reflog: %w", err)
 	}
-
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return nil, nil
-	}
-
-	var entries []ReflogEntry
-	for _, line := range strings.Split(text, "\n") {
-		parts := strings.SplitN(line, "\x00", 4)
-		if len(parts) != 4 {
-			continue
-		}
-		entries = append(entries, ReflogEntry{
-			Hash:     parts[0],
-			Selector: parts[1],
-			Date:     parts[2],
-			Subject:  parts[3],
-		})
-	}
-	return entries, nil
+	return ParseReflog(text), nil
 }
 
 // ReflogDiff returns the diff for a reflog entry by running git diff <hash>^ <hash>.
@@ -246,29 +196,7 @@ func ListStashes(repoPath string) ([]Stash, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listing stashes: %w", err)
 	}
-
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return nil, nil
-	}
-
-	var stashes []Stash
-	for _, line := range strings.Split(text, "\n") {
-		parts := strings.SplitN(line, "\x00", 3)
-		if len(parts) != 3 {
-			continue
-		}
-		// parts[0] is like "stash@{0}"
-		idxStr := strings.TrimPrefix(parts[0], "stash@{")
-		idxStr = strings.TrimSuffix(idxStr, "}")
-		idx, _ := strconv.Atoi(idxStr)
-		stashes = append(stashes, Stash{
-			Index:   idx,
-			Date:    parts[1],
-			Message: parts[2],
-		})
-	}
-	return stashes, nil
+	return ParseStashList(text), nil
 }
 
 // StashDiff returns the diff for a specific stash entry.
@@ -301,7 +229,7 @@ func ListBranches(repoPath string) ([]Branch, error) {
 		if line == "" {
 			continue
 		}
-		b, upstream := parseBranchLine(line)
+		b, upstream := ParseBranchLine(line)
 
 		if b.HasUpstream && !b.UpstreamGone {
 			ahead, behind, err := branchAheadBehind(repoPath, b.Name, upstream)
@@ -350,51 +278,6 @@ func BranchDiff(worktreePath string) (string, error) {
 	return gitCmd(worktreePath, "diff", "HEAD")
 }
 
-// worktreeInfo is internal data parsed from git worktree list output.
-type worktreeInfo struct {
-	path     string
-	branch   string
-	isBare   bool
-	detached bool
-}
-
-func splitWorktreeBlocks(output string) []string {
-	var blocks []string
-	var current []string
-	for _, line := range strings.Split(strings.TrimRight(output, "\n"), "\n") {
-		if line == "" {
-			if len(current) > 0 {
-				blocks = append(blocks, strings.Join(current, "\n"))
-				current = nil
-			}
-			continue
-		}
-		current = append(current, line)
-	}
-	if len(current) > 0 {
-		blocks = append(blocks, strings.Join(current, "\n"))
-	}
-	return blocks
-}
-
-func parseWorktreeBlock(block string) worktreeInfo {
-	var wt worktreeInfo
-	for _, line := range strings.Split(block, "\n") {
-		switch {
-		case strings.HasPrefix(line, "worktree "):
-			wt.path = strings.TrimPrefix(line, "worktree ")
-		case strings.HasPrefix(line, "branch refs/heads/"):
-			wt.branch = strings.TrimPrefix(line, "branch refs/heads/")
-		case line == "bare":
-			wt.isBare = true
-		case line == "detached":
-			wt.detached = true
-			wt.branch = "(detached)"
-		}
-	}
-	return wt
-}
-
 // branchWorktreeMap returns a map of branch name -> worktree paths and detached worktree paths.
 func branchWorktreeMap(repoPath string) (map[string][]string, []string, error) {
 	out, err := gitCmd(repoPath, "worktree", "list", "--porcelain")
@@ -404,36 +287,19 @@ func branchWorktreeMap(repoPath string) (map[string][]string, []string, error) {
 
 	m := make(map[string][]string)
 	var detachedPaths []string
-	for _, block := range splitWorktreeBlocks(out) {
-		wt := parseWorktreeBlock(block)
-		if wt.isBare {
+	for _, wt := range ParseWorktreeList(out) {
+		if wt.IsBare {
 			continue
 		}
-		if wt.detached {
-			detachedPaths = append(detachedPaths, wt.path)
+		if wt.Detached {
+			detachedPaths = append(detachedPaths, wt.Path)
 			continue
 		}
-		if wt.branch != "" {
-			m[wt.branch] = append(m[wt.branch], wt.path)
+		if wt.Branch != "" {
+			m[wt.Branch] = append(m[wt.Branch], wt.Path)
 		}
 	}
 	return m, detachedPaths, nil
-}
-
-func parseBranchLine(line string) (Branch, string) {
-	parts := strings.SplitN(line, "\t", 3)
-	b := Branch{Name: parts[0]}
-
-	var upstream string
-	if len(parts) > 1 && parts[1] != "" {
-		b.HasUpstream = true
-		upstream = parts[1]
-		if len(parts) > 2 && strings.Contains(parts[2], "gone") {
-			b.UpstreamGone = true
-		}
-	}
-
-	return b, upstream
 }
 
 func branchAheadBehind(repoPath, branchName, upstream string) (int, int, error) {
@@ -441,14 +307,7 @@ func branchAheadBehind(repoPath, branchName, upstream string) (int, int, error) 
 	if err != nil {
 		return 0, 0, err
 	}
-
-	parts := strings.Fields(strings.TrimSpace(out))
-	if len(parts) != 2 {
-		return 0, 0, nil
-	}
-
-	ahead, _ := strconv.Atoi(parts[0])
-	behind, _ := strconv.Atoi(parts[1])
+	ahead, behind := ParseAheadBehind(out)
 	return ahead, behind, nil
 }
 
@@ -477,17 +336,9 @@ func populateDirtyStatus(b *Branch, paths []string) {
 		if err != nil {
 			continue
 		}
-		for _, line := range splitLines(diffOut) {
-			fields := strings.Fields(line)
-			if len(fields) < 3 {
-				continue
-			}
-			// Binary files show "-\t-\tfilename"; Atoi returns 0 for "-".
-			added, _ := strconv.Atoi(fields[0])
-			deleted, _ := strconv.Atoi(fields[1])
-			b.LinesAdded += added
-			b.LinesDeleted += deleted
-		}
+		a, d := ParseNumstat(diffOut)
+		b.LinesAdded += a
+		b.LinesDeleted += d
 	}
 }
 
